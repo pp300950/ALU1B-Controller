@@ -60,6 +60,7 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
     int result_dec;
     char result_bin[5]; // สำหรับเก็บผลลัพธ์ 4 บิต
     int is_negative = 0; // แฟล็กสำหรับระบุว่าผลลัพธ์ติดลบหรือไม่ (0 = ไม่ติดลบ, 1 = ติดลบ)
+    char mode_description[50]; // สำหรับเก็บคำอธิบายโหมด
 
     // ตรวจสอบ X เพื่อกำหนดว่า A เป็นค่าติดลบหรือไม่ (Two's Complement)
     if (X == '1') {
@@ -78,12 +79,11 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
     printf("Input A (decimal): %d\n", A_dec);
     printf("Input B (decimal): %d\n", B_dec);
 
-    printf("Mode: %s\n", mode);
-
     if (strcmp(mode, "000") == 0) { // Add (A + B)
+        strcpy(mode_description, "Add (A + B)");
         result_dec = A_dec + B_dec;
-        printf("Operation: A + B\n");
     } else if (strcmp(mode, "001") == 0) { // Subtract (A - B)
+        strcpy(mode_description, "Subtract (A - B)");
         // การลบ A - B สามารถทำได้โดย A + (-B)
         // โดยการหา Two's Complement ของ B และนำไปบวกกับ A
         char B_twos_comp[5];
@@ -92,17 +92,17 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
         int B_twos_comp_dec = binToDec(B_twos_comp);
         
         result_dec = A_dec + B_twos_comp_dec;
-        printf("Operation: A - B\n");
     } else if (strcmp(mode, "010") == 0) { // AND (A & B)
+        strcpy(mode_description, "AND (A & B)");
         result_dec = A_dec & B_dec; // ทำ Bitwise AND
-        printf("Operation: A & B\n");
     } else if (strcmp(mode, "011") == 0) { // OR (A | B)
+        strcpy(mode_description, "OR (A | B)");
         result_dec = A_dec | B_dec; // ทำ Bitwise OR
-        printf("Operation: A | B\n");
     } else if (strcmp(mode, "100") == 0) { // XOR (A ^ B)
+        strcpy(mode_description, "XOR (A ^ B)");
         result_dec = A_dec ^ B_dec; // ทำ Bitwise XOR
-        printf("Operation: A ^ B\n");
     } else if (strcmp(mode, "101") == 0) { // NOT A (~A)
+        strcpy(mode_description, "NOT A (~A)");
         // สำหรับ NOT A เราจะทำ Bitwise NOT บนไบนารี A โดยตรง
         // เนื่องจากผลลัพธ์อาจจะเป็นค่าลบในระบบ Two's Complement
         for (int i = 0; i < 4; i++) {
@@ -114,12 +114,11 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
         }
         result_bin[4] = '\0';
         result_dec = binToDec(result_bin); // แปลงกลับเป็นทศนิยมเพื่อแสดง
-        printf("Operation: ~A\n");
     } else if (strcmp(mode, "110") == 0) { // Compare Equal (A == B)
+        strcpy(mode_description, "Compare Equal (A == B)");
         if (A_dec == B_dec) {
             result_dec = 0; // ถ้าเท่ากัน, ผลลัพธ์ 0000
             strcpy(result_bin, "0000"); // กำหนดผลลัพธ์เป็น "0000"
-            printf("Operation: A == B (True)\n");
         } else {
             // ถ้าไม่เท่ากัน, ผลลัพธ์อาจจะไม่ใช่ 0000
             // เพื่อให้สอดคล้องกับ Zero Flag, อาจจะส่งค่าที่ไม่ใช่ 0000 ออกมา
@@ -129,12 +128,15 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
             twosComplement(B_twos_comp);
             int B_twos_comp_dec = binToDec(B_twos_comp);
             result_dec = A_dec + B_twos_comp_dec;
-            printf("Operation: A == B (False)\n");
         }
     } else {
         printf("Invalid mode selected.\n");
         return;
     }
+
+    // แสดงโหมดการทำงานพร้อมคำอธิบาย
+    printf("Mode: %s (%s)\n", mode, mode_description);
+    printf("Operation: %s\n", mode_description); // แสดง Operation อีกครั้งเพื่อให้ชัดเจน
 
     // การจัดการผลลัพธ์ที่เป็นลบและแปลงเป็น Two's Complement สำหรับแสดงผล
     if (result_dec < 0) {
@@ -163,8 +165,8 @@ int main() {
     char A_bin[5]; // สำหรับเก็บ A 4 บิต + null terminator
     char B_bin[5]; // สำหรับเก็บ B 4 บิต + null terminator
 
-    printf("Enter input (X Y1 Y2 Y3 A1 A2 A3 A4 B1 B2 B3 B4): ");
-    scanf(" %c %c %c %c %s %s", &X, &Y1, &Y2, &Y3, A_bin, B_bin);
+    printf("Enter input (X Y1Y2Y3 AAAA BBBB): "); // ปรับข้อความแนะนำอินพุตให้ชัดเจนขึ้น
+    scanf(" %c %c%c%c %s %s", &X, &Y1, &Y2, &Y3, A_bin, B_bin);
 
     // ตรวจสอบความถูกต้องของอินพุต A และ B (ต้องเป็น 4 บิต)
     if (strlen(A_bin) != 4 || strlen(B_bin) != 4) {
