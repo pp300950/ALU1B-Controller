@@ -114,18 +114,18 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
         }
         result_bin[4] = '\0';
         result_dec = binToDec(result_bin); // แปลงกลับเป็นทศนิยมเพื่อแสดง
-      
     } else if (strcmp(mode, "110") == 0) { // Compare Equal (A == B)
     //เวอร์ชั่นใหม่ออกเเบบมาให้เเสดงผลเเค่ 0 กับ 1 เพื่อเเสดงผลบอกว่าการเปรียบเทียบมันเท่ากันหรือไม่
         strcpy(mode_description, "Compare Equal (A == B)");
         if (A_dec == B_dec) {
             result_dec = 0; // ในทางทศนิยมให้เป็น 0
-            strcpy(result_bin, "0001 A == B"); // ให้น้องเป็น 1 เมื่อค่าเท่ากันตอนเปรียบเทียบ (เเทน 1)
+            strcpy(result_bin, "0001"); // ให้น้องเป็น 1 เมื่อค่าเท่ากันตอนเปรียบเทียบ (เเทน 1)
         } else {
             // ถ้าไม่เท่ากัน, ผลลัพธ์เป็น 0
             result_dec = 0;
-            strcpy(result_bin,"0000 A != B"); //ถ้าไม่เท่ากัน คาย 0000 (เเทน 0)
+            strcpy(result_bin,"0000"); //ถ้าไม่เท่ากัน คาย 0000 (เเทน 0)
         }
+        
     } else {
         printf("Invalid mode selected.\n");
         return;
@@ -151,6 +151,7 @@ void alu_4bit(char X, char Y1, char Y2, char Y3, char *A_bin, char *B_bin) {
         }
         decToBin(result_dec, result_bin);
     }
+    
     // พิมพ์ผลลัพธ์
     printf("Output: %s\n", result_bin);
 }
@@ -177,6 +178,7 @@ int main() {
             return 1;
         }
     }
+
     // เรียกใช้ฟังก์ชัน ALU
     alu_4bit(X, Y1, Y2, Y3, A_bin, B_bin);
 
