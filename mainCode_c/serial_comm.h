@@ -100,7 +100,6 @@ cleanup:
     hSerial = INVALID_HANDLE_VALUE;
     return INVALID_HANDLE_VALUE;
 }
-
 // ฟังก์ชันสำหรับส่งและรับข้อมูล
 bool sendAndReceiveData(const char* dataToSend) {
     if (hSerial == INVALID_HANDLE_VALUE) {
@@ -111,13 +110,16 @@ bool sendAndReceiveData(const char* dataToSend) {
     DWORD bytesWritten = 0;
     DWORD bytesRead = 0;
     char readBuffer[MAX_READ_BUFFER] = {0};
-    
+
     // ตรวจสอบข้อมูลก่อนส่ง
     size_t len = strlen(dataToSend);
     if (len == 0 || dataToSend[len - 1] != '\n') {
         printf("[ERROR] ข้อมูลที่จะส่งต้องลงท้ายด้วยอักขระขึ้นบรรทัดใหม่ (\\n)\n");
         return false;
     }
+
+    // ล้าง buffer ก่อนส่งเพื่อเคลียร์ข้อมูลเก่า
+    clearSerialBuffer();
 
     // เขียนข้อมูลจนครบ
     DWORD dataSize = (DWORD)len;
@@ -135,11 +137,11 @@ bool sendAndReceiveData(const char* dataToSend) {
     } else {
         printf("[INFO] เขียนข้อมูลสำเร็จ %lu ไบต์\n", totalWritten);
     }
-    
-    //เคลียร์ buffer ก่อนอ่านเพื่อป้องกันข้อมูลเก่า
-    clearSerialBuffer();
 
-    //ลูป อ่านข้อมูลตอบกลับ
+    // รอให้ Arduino ประมวลผลและส่งข้อมูลกลับ
+    Sleep(100); // 100ms ปรับได้ตามความเร็วของโค้ด Arduino
+
+    // อ่านข้อมูลตอบกลับทั้งหมด
     DWORD totalBytesRead = 0;
     do {
         if (totalBytesRead >= MAX_READ_BUFFER - 1) {
@@ -149,19 +151,14 @@ bool sendAndReceiveData(const char* dataToSend) {
         if (ReadFile(hSerial, readBuffer + totalBytesRead, MAX_READ_BUFFER - 1 - totalBytesRead, &bytesRead, NULL) && bytesRead > 0) {
             totalBytesRead += bytesRead;
         } else {
-            DWORD err = GetLastError();
-            if (err == ERROR_SUCCESS) { //no more data
-                break;
-            } else if (err != ERROR_IO_PENDING && err != ERROR_OPERATION_ABORTED) {
-                printf("[ERROR] ReadFile ล้มเหลว รหัส: %lu\n", err);
-                return false;
-            }
-            break;
+            break; // ไม่มีข้อมูลเพิ่ม
         }
     } while (true);
+
     readBuffer[totalBytesRead] = '\0';
+
     if (totalBytesRead > 0) {
-        printf("[INFO] ได้รับข้อมูล %lu ไบต์: %s\n", totalBytesRead, readBuffer);
+        printf("[INFO] ได้รับข้อมูล %lu ไบต์:\n%s", totalBytesRead, readBuffer);
         return true;
     } else {
         printf("[DEBUG] ไม่ได้รับข้อมูลหรืออ่านข้อมูลหมดเวลาแล้ว\n");
@@ -240,4 +237,15 @@ int main() {
     printf("[DEBUG] ปิดพอร์ตซีเรียลแล้ว เย่ๆ\n");
 
     return 0;
+}
+
+
+// serial_comm.c
+int sendAndReceiveData(const char *command) {
+    // ส่งคำสั่งไป Arduino
+    // รอรับค่ากลับ เช่น "1\n"
+    char buffer[16];
+    if (!serial_write(command)) return -1;
+    if (!serial_read(buffer, sizeof(buffer))) return -1;
+    return atoi(buffer); // แปลงเป็น int
 }
