@@ -4,26 +4,27 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include <locale.h>
 #define COM_PORT "COM3"
 #define BAUD_RATE CBR_9600
 #define UPLOAD_WAIT_MS 3000
 #define READ_TIMEOUT_MS 1000
 #define MAX_READ_BUFFER 256
 
-HANDLE hSerial = INVALID_HANDLE_VALUE; // Global handle for proper cleanup
+HANDLE hSerial = INVALID_HANDLE_VALUE;
 
-// ฟังก์ชันสำหรับเคลียร์ buffer ของ serial port
+//เคลียร์ buffer ของ serial port
 void clearSerialBuffer() {
     if (hSerial != INVALID_HANDLE_VALUE) {
-        printf("[DEBUG] Clearing serial port buffers.\n");
+        printf("[DEBUG] กำลังล้างบัฟเฟอร์ของพอร์ตซีเรียล\n");
         PurgeComm(hSerial, PURGE_RXCLEAR | PURGE_TXCLEAR);
     }
 }
 
-// Signal handler สำหรับการ cleanup
+//Signal handlerสำหรับ cleanup
 BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
     if (dwCtrlType == CTRL_C_EVENT) {
-        printf("\n[INFO] Ctrl+C detected. Cleaning up and exiting...\n");
+        printf("\n[INFO] ตรวจพบ Ctrl+C. กำลังปิดโปรแกรม...\n");
         if (hSerial != INVALID_HANDLE_VALUE) {
             clearSerialBuffer();
             CloseHandle(hSerial);
@@ -39,7 +40,7 @@ HANDLE openAndSetupSerialPort() {
     DCB dcbSerialParams = {0};
     COMMTIMEOUTS timeouts = {0};
 
-    printf("[DEBUG] Opening serial port: %s\n", COM_PORT);
+    printf("[DEBUG] กำลังเปิดพอร์ตซีเรียล: %s\n", COM_PORT);
 
     int attempts = 0;
     while (attempts < 5) {
@@ -49,7 +50,7 @@ HANDLE openAndSetupSerialPort() {
         }
 
         DWORD err = GetLastError();
-        printf("[WARNING] Failed to open port (attempt %d). Error: %lu. Retrying in 1s...\n", attempts + 1, err);
+        printf("[WARNING] เปิดพอร์ตไม่ได้ (ครั้งที่ %d). รหัสข้อผิดพลาด: %lu. กำลังลองใหม่ใน 1 วินาที...\n", attempts + 1, err);
         Sleep(1000);
         attempts++;
     }
@@ -57,19 +58,18 @@ HANDLE openAndSetupSerialPort() {
     if (hSerial == INVALID_HANDLE_VALUE) {
         DWORD err = GetLastError();
         if (err == ERROR_FILE_NOT_FOUND) {
-            printf("[ERROR] Serial port %s not found.\n", COM_PORT);
+            printf("[ERROR] ไม่พบพอร์ตซีเรียล %s\n", COM_PORT);
         } else if (err == ERROR_ACCESS_DENIED) {
-            printf("[ERROR] Serial port %s is already in use by another application (e.g., Serial Monitor).\n", COM_PORT);
+            printf("[ERROR] พอร์ตซีเรียล %s กำลังถูกใช้งานโดยโปรแกรมอื่น (เช่น Serial Monitor)\n", COM_PORT);
         } else {
-            printf("[ERROR] Could not open serial port %s. Error code: %lu\n", COM_PORT, err);
+            printf("[ERROR] ไม่สามารถเปิดพอร์ตซีเรียล %s ได้ รหัสข้อผิดพลาด: %lu\n", COM_PORT, err);
         }
         return INVALID_HANDLE_VALUE;
     }
     
-    // ตั้งค่าพารามิเตอร์ Serial
     dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
     if (!GetCommState(hSerial, &dcbSerialParams)) {
-        printf("[ERROR] GetCommState failed.\n");
+        printf("[ERROR] GetCommState ล้มเหลว\n");
         goto cleanup;
     }
     dcbSerialParams.BaudRate = BAUD_RATE;
@@ -77,18 +77,18 @@ HANDLE openAndSetupSerialPort() {
     dcbSerialParams.StopBits = ONESTOPBIT;
     dcbSerialParams.Parity = NOPARITY;
     if (!SetCommState(hSerial, &dcbSerialParams)) {
-        printf("[ERROR] SetCommState failed.\n");
+        printf("[ERROR] SetCommState ล้มเหลว\n");
         goto cleanup;
     }
 
-    // ตั้งค่า timeouts ให้เหมาะสมสำหรับการอ่านแบบวนลูป
+    //ตั้งค่า timeouts สำหรับการอ่านแบบวนลูป
     timeouts.ReadIntervalTimeout = 100;
     timeouts.ReadTotalTimeoutConstant = READ_TIMEOUT_MS;
     timeouts.ReadTotalTimeoutMultiplier = 0;
     timeouts.WriteTotalTimeoutConstant = 50;
     timeouts.WriteTotalTimeoutMultiplier = 10;
     if (!SetCommTimeouts(hSerial, &timeouts)) {
-        printf("[ERROR] SetCommTimeouts failed.\n");
+        printf("[ERROR] SetCommTimeouts ล้มเหลว\n");
         goto cleanup;
     }
     
@@ -104,7 +104,7 @@ cleanup:
 // ฟังก์ชันสำหรับส่งและรับข้อมูล
 bool sendAndReceiveData(const char* dataToSend) {
     if (hSerial == INVALID_HANDLE_VALUE) {
-        printf("[ERROR] Invalid serial handle.\n");
+        printf("[ERROR] Handle ซีเรียลไม่ถูกต้อง\n");
         return false;
     }
 
@@ -115,45 +115,45 @@ bool sendAndReceiveData(const char* dataToSend) {
     // ตรวจสอบข้อมูลก่อนส่ง
     size_t len = strlen(dataToSend);
     if (len == 0 || dataToSend[len - 1] != '\n') {
-        printf("[ERROR] Data to send must end with a newline character (\\n).\n");
+        printf("[ERROR] ข้อมูลที่จะส่งต้องลงท้ายด้วยอักขระขึ้นบรรทัดใหม่ (\\n)\n");
         return false;
     }
 
     // เขียนข้อมูลจนครบ
     DWORD dataSize = (DWORD)len;
     DWORD totalWritten = 0;
-    printf("[DEBUG] Writing %lu bytes: \"%s\"\n", dataSize, dataToSend);
+    printf("[DEBUG] กำลังเขียนข้อมูล %lu ไบต์: \"%s\"\n", dataSize, dataToSend);
     while (totalWritten < dataSize) {
         if (!WriteFile(hSerial, dataToSend + totalWritten, dataSize - totalWritten, &bytesWritten, NULL)) {
-            printf("[ERROR] WriteFile failed. Error code: %lu\n", GetLastError());
+            printf("[ERROR] WriteFile ล้มเหลว รหัสข้อผิดพลาด: %lu\n", GetLastError());
             return false;
         }
         totalWritten += bytesWritten;
     }
     if (totalWritten != dataSize) {
-        printf("[WARNING] Only %lu of %lu bytes were sent.\n", totalWritten, dataSize);
+        printf("[WARNING] ส่งข้อมูลไปเพียง %lu จากทั้งหมด %lu ไบต์\n", totalWritten, dataSize);
     } else {
-        printf("[INFO] Successfully wrote %lu bytes.\n", totalWritten);
+        printf("[INFO] เขียนข้อมูลสำเร็จ %lu ไบต์\n", totalWritten);
     }
     
-    // เคลียร์ buffer ก่อนอ่านเพื่อป้องกันข้อมูลเก่า
+    //เคลียร์ buffer ก่อนอ่านเพื่อป้องกันข้อมูลเก่า
     clearSerialBuffer();
 
-    // อ่านข้อมูลตอบกลับแบบวนลูป
+    //ลูป อ่านข้อมูลตอบกลับ
     DWORD totalBytesRead = 0;
     do {
         if (totalBytesRead >= MAX_READ_BUFFER - 1) {
-            printf("[WARNING] Response truncated to %d bytes due to buffer limit.\n", MAX_READ_BUFFER - 1);
+            printf("[WARNING] ข้อมูลที่รับมาถูกตัดเหลือ %d ไบต์ เนื่องจากบัฟเฟอร์เต็ม\n", MAX_READ_BUFFER - 1);
             break;
         }
         if (ReadFile(hSerial, readBuffer + totalBytesRead, MAX_READ_BUFFER - 1 - totalBytesRead, &bytesRead, NULL) && bytesRead > 0) {
             totalBytesRead += bytesRead;
         } else {
             DWORD err = GetLastError();
-            if (err == ERROR_SUCCESS) { // no more data
+            if (err == ERROR_SUCCESS) { //no more data
                 break;
             } else if (err != ERROR_IO_PENDING && err != ERROR_OPERATION_ABORTED) {
-                printf("[ERROR] ReadFile failed. Code: %lu\n", err);
+                printf("[ERROR] ReadFile ล้มเหลว รหัส: %lu\n", err);
                 return false;
             }
             break;
@@ -161,29 +161,29 @@ bool sendAndReceiveData(const char* dataToSend) {
     } while (true);
     readBuffer[totalBytesRead] = '\0';
     if (totalBytesRead > 0) {
-        printf("[INFO] Received %lu bytes: %s\n", totalBytesRead, readBuffer);
+        printf("[INFO] ได้รับข้อมูล %lu ไบต์: %s\n", totalBytesRead, readBuffer);
         return true;
     } else {
-        printf("[DEBUG] No data received or read timed out.\n");
+        printf("[DEBUG] ไม่ได้รับข้อมูลหรืออ่านข้อมูลหมดเวลาแล้ว\n");
         return false;
     }
 }
 
-// ฟังก์ชันสำหรับเรียกใช้ arduino-cli
+//เรียกarduino-cli
 bool executeArduinoCLI(const char* cliPath, const char* board, const char* port, const char* inoPath) {
     char commandLine[1024];
     snprintf(commandLine, sizeof(commandLine),
              "\"%s\" compile --upload -b %s -p %s \"%s\"",
              cliPath, board, port, inoPath);
 
-    printf("[INFO] Executing Arduino CLI command...\n");
-    printf("[DEBUG] Command: %s\n", commandLine);
+    printf("[INFO] กำลังรันคำสั่ง Arduino CLI...\n");
+    printf("[DEBUG] คำสั่ง: %s\n", commandLine);
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi;
 
     if (!CreateProcessA(NULL, commandLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        printf("[ERROR] CreateProcess failed. Error code: %lu\n", GetLastError());
+        printf("[ERROR] CreateProcess ล้มเหลว รหัสข้อผิดพลาด: %lu\n", GetLastError());
         return false;
     }
 
@@ -196,45 +196,48 @@ bool executeArduinoCLI(const char* cliPath, const char* board, const char* port,
     CloseHandle(pi.hThread);
 
     if (exitCode != 0) {
-        printf("[ERROR] Failed to upload Arduino code. Exit code: %lu\n", exitCode);
+        printf("[ERROR] อัปโหลดโค้ด Arduino ล้มเหลว รหัสออก: %lu\n", exitCode);
         return false;
     }
 
-    printf("[INFO] Arduino code uploaded successfully.\n");
+    printf("[INFO] อัปโหลดโค้ด Arduino สำเร็จแล้ว\n");
     return true;
 }
 
 int main() {
-    // กำหนด path และพารามิเตอร์
+    //ปรินต์ภาษาไทย
+    SetConsoleOutputCP(CP_UTF8);
+    
+    //path และพารามิเตอร์
     const char* arduinoCliPath = "C:\\Users\\Administrator\\Desktop\\arduino-cli.exe";
     const char* boardType = "arduino:avr:uno";
     const char* inoFilePath = "C:\\Users\\Administrator\\Desktop\\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino";
 
-    // ตั้งค่า signal handler
+    //ตั้งค่า signal handler
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
-    // อัปโหลดโค้ด Arduino
+    //อัปโหลดโค้ด Arduino
     if (!executeArduinoCLI(arduinoCliPath, boardType, COM_PORT, inoFilePath)) {
         return 1;
     }
 
-    printf("[INFO] Waiting for %d ms for board to be ready...\n", UPLOAD_WAIT_MS);
+    printf("[INFO] กำลังรอให้บอร์ดพร้อมใช้งานเป็นเวลา %d มิลลิวินาที...\n", UPLOAD_WAIT_MS);
     Sleep(UPLOAD_WAIT_MS);
 
-    // เปิดพอร์ต
+    //เปิดพอร์ต
     hSerial = openAndSetupSerialPort();
     if (hSerial == INVALID_HANDLE_VALUE) {
         return 1;
     }
 
-    // ส่งข้อมูลไปยัง Arduino
+    //ส่งข้อมูลไปบอร์ด
     const char* dataToSend = "0110 1 0\n";
     sendAndReceiveData(dataToSend);
 
-    // ปิดพอร์ตอย่างปลอดภัย
+    //ปิดพอร์ต
     clearSerialBuffer();
     CloseHandle(hSerial);
-    printf("[DEBUG] Serial port closed.\n");
+    printf("[DEBUG] ปิดพอร์ตซีเรียลแล้ว เย่ๆ\n");
 
     return 0;
 }
