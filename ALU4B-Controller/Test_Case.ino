@@ -10,7 +10,9 @@ const int B_INPUT_PIN = 7; // อินพุต B
 
 // ขาเอาต์พุตของ ALU
 const int NEGATIVE_OUTPUT_PIN = 8; // ขาเอาต์พุตแสดงค่าติดลบ (1=ติดลบ, 0=ไม่ติดลบ)
-const int RESULT_OUTPUT_PIN = 9;   // ขาเอาต์พุตแสดงผลลัพธ์จาก MUX
+const int RESULT_OUTPUT_PIN = 9; // ขาเอาต์พุตแสดงผลลัพธ์ทั่วไปจาก MUX
+const int NOT_OUTPUT_PIN = 10; // ขาเอาต์พุตสำหรับ NOT Gate โดยเฉพาะ
+const int CARRY_OUT_PIN = 11; // ขาเอาต์พุตสำหรับค่าทด (Carry)
 
 // --- Setup Function ---
 void setup() {
@@ -25,6 +27,8 @@ void setup() {
   // ตั้งค่าขาเอาต์พุตของ ALU เป็น INPUT
   pinMode(NEGATIVE_OUTPUT_PIN, INPUT);
   pinMode(RESULT_OUTPUT_PIN, INPUT);
+  pinMode(NOT_OUTPUT_PIN, INPUT); 
+  pinMode(CARRY_OUT_PIN, INPUT);
 
   // เริ่มต้นการสื่อสาร Serial
   Serial.begin(9600);
@@ -32,7 +36,7 @@ void setup() {
 }
 
 // --- Test Function ---
-void runTest(const char* testName, int muxCode, int subAddPin, int aInput, int bInput, int expectedResult, int expectedNegative) {
+void runTest(const char* testName, int muxCode, int subAddPin, int aInput, int bInput, int expectedResult, int expectedNegative, int expectedCarry) {
   // ตั้งค่าขาควบคุม MUX
   digitalWrite(MUX_PIN_0, (muxCode & 0b001));
   digitalWrite(MUX_PIN_1, (muxCode & 0b010) >> 1);
@@ -49,92 +53,103 @@ void runTest(const char* testName, int muxCode, int subAddPin, int aInput, int b
   delay(10);
   
   // อ่านค่าเอาต์พุต
-  int resultOutput = digitalRead(RESULT_OUTPUT_PIN);
+  int resultOutput;
   int negativeOutput = digitalRead(NEGATIVE_OUTPUT_PIN);
+  int carryOutput = digitalRead(CARRY_OUT_PIN);
   
-  // ตรวจสอบผลลัพธ์และแสดงผลใน Serial Monitor
-  Serial.print("Testing ");
+  if (strcmp(testName, "NOT") == 0) {
+    resultOutput = digitalRead(NOT_OUTPUT_PIN); // ถ้าเป็น NOT ให้อ่านจากขา 10
+  } else if (strcmp(testName, "CARRY OUT") == 0) {
+    resultOutput = digitalRead(CARRY_OUT_PIN); // ถ้าเป็น CARRY OUT ให้อ่านจากขา 11
+  } else {
+    resultOutput = digitalRead(RESULT_OUTPUT_PIN); // ถ้าเป็นฟังก์ชันอื่น ให้อ่านจากขา 9
+  }
+  
+  // แสดงผลการทดสอบในรูปแบบใหม่: ชื่อฟังก์ชัน + อินพุต (MuxCode, SubAddPin, A, B)
+  Serial.print("Test: ");
   Serial.print(testName);
-  Serial.print(" (A="); Serial.print(aInput);
-  Serial.print(", B="); Serial.print(bInput);
-  Serial.print(")... ");
-
+  Serial.print(" | Input: ");
+  Serial.print((muxCode & 0b100) >> 2);
+  Serial.print((muxCode & 0b010) >> 1);
+  Serial.print(muxCode & 0b001);
+  Serial.print(" ");
+  Serial.print(subAddPin);
+  Serial.print(" ");
+  Serial.print(aInput);
+  Serial.print(" ");
+  Serial.print(bInput);
+  
   bool testPassed = false;
-  // เงื่อนไขการตรวจสอบ: ถ้าเป็นโหมด 'ลบ' (subAddPin=1) ให้ตรวจสอบทั้ง Result และ Negative
-  if (subAddPin == 1) {
-    if (resultOutput == expectedResult && negativeOutput == expectedNegative) {
-      testPassed = true;
-    }
-  } 
-  // ถ้าเป็นโหมดอื่น ให้ตรวจสอบแค่ Result เท่านั้น
-  else {
-    if (resultOutput == expectedResult) {
-      testPassed = true;
-    }
+  // เงื่อนไขการตรวจสอบ
+  if (strcmp(testName, "ADD") == 0) {
+    testPassed = (resultOutput == expectedResult && carryOutput == expectedCarry);
+  } else if (subAddPin == 1) { // สำหรับ SUB
+    testPassed = (resultOutput == expectedResult && negativeOutput == expectedNegative);
+  } else { // สำหรับฟังก์ชันอื่นๆ
+    testPassed = (resultOutput == expectedResult);
   }
 
   if (testPassed) {
-    Serial.print("PASS | Got: Result=");
-    Serial.print(resultOutput);
-    
-    if (subAddPin == 1) {
-      Serial.print(", Negative=");
-      Serial.println(negativeOutput);
-    } else {
-      Serial.println();
-    }
-    
+    Serial.print(" -> PASS | Got Result = ");
   } else {
-    Serial.print("FAIL | Got: Result=");
-    Serial.print(resultOutput);
-    
-    // แสดงค่า Negative ที่คาดหวังและที่ได้ เฉพาะในโหมด 'ลบ' เท่านั้น
-    if (subAddPin == 1) {
-      Serial.print(", Negative=");
-      Serial.println(negativeOutput);
-    } else {
-      Serial.println();
-    }
+    Serial.print(" -> FAIL | Got Result = ");
   }
+  
+  // แสดงผลลัพธ์ที่ได้กลับมาจาก ALU
+  Serial.print(resultOutput);
+  if (strcmp(testName, "ADD") == 0) {
+    Serial.print(", Carry = ");
+    Serial.print(carryOutput);
+  } else if (subAddPin == 1) {
+    Serial.print(", Negative = ");
+    Serial.print(negativeOutput);
+  }
+  Serial.println(); // ขึ้นบรรทัดใหม่เมื่อจบบรรทัดการแสดงผล
 }
 
 // --- Loop Function ---
 void loop() {
   Serial.println("--- Starting Automated Test Cases ---");
 
-  // Test Cases for ADD/SUB function
-  runTest("ADD (0+0=0)", 0b001, 0, 0, 0, 0, 0); 
-  runTest("ADD (0+1=1)", 0b001, 0, 0, 1, 1, 0); 
-  runTest("ADD (1+0=1)", 0b001, 0, 1, 0, 1, 0);
-  runTest("ADD (1+1=0)", 0b001, 0, 1, 1, 0, 0);
+  // Test Cases for ADD/SUB function (MuxCode: 0b001)
+  runTest("ADD", 0b001, 0, 0, 0, 0, 0, 0); 
+  runTest("ADD", 0b001, 0, 0, 1, 1, 0, 0); 
+  runTest("ADD", 0b001, 0, 1, 0, 1, 0, 0);
+  runTest("ADD", 0b001, 0, 1, 1, 0, 0, 1);
 
-  runTest("SUB (0-0=0)", 0b001, 1, 0, 0, 0, 0);
-  runTest("SUB (0-1=1, Negative)", 0b001, 1, 0, 1, 1, 1);
-  runTest("SUB (1-0=1)", 0b001, 1, 1, 0, 1, 0);
-  runTest("SUB (1-1=0)", 0b001, 1, 1, 1, 0, 0);
+  runTest("SUB", 0b001, 1, 0, 0, 0, 0, 0);
+  runTest("SUB", 0b001, 1, 0, 1, 1, 1, 0);
+  runTest("SUB", 0b001, 1, 1, 0, 1, 0, 0);
+  runTest("SUB", 0b001, 1, 1, 1, 0, 0, 0);
 
-  // Test Cases for NOT function
-  runTest("NOT (A=0)", 0b011, 0, 0, 0, 1, 0);
-  runTest("NOT (A=1)", 0b011, 0, 1, 0, 0, 0);
+  // Test Cases for Carry Out (C1) function (MuxCode: 0b010)
+  runTest("CARRY OUT", 0b010, 0, 0, 0, 0, 0, 0);
+  runTest("CARRY OUT", 0b010, 0, 0, 1, 0, 0, 0);
+  runTest("CARRY OUT", 0b010, 0, 1, 0, 0, 0, 0);
+  runTest("CARRY OUT", 0b010, 0, 1, 1, 1, 0, 0);
+
+  // Test Cases for NOT function (MuxCode: 0b111)
+  runTest("NOT", 0b111, 0, 0, 0, 1, 0, 0);
+  runTest("NOT", 0b111, 0, 1, 0, 0, 0, 0);
   
-  // Test Cases for AND function
-  runTest("AND (0&0=0)", 0b100, 0, 0, 0, 0, 0);
-  runTest("AND (0&1=0)", 0b100, 0, 0, 1, 0, 0);
-  runTest("AND (1&0=0)", 0b100, 0, 1, 0, 0, 0);
-  runTest("AND (1&1=1)", 0b100, 0, 1, 1, 1, 0);
+  // Test Cases for AND function (MuxCode: 0b100)
+  runTest("AND", 0b100, 0, 0, 0, 0, 0, 0);
+  runTest("AND", 0b100, 0, 0, 1, 0, 0, 0);
+  runTest("AND", 0b100, 0, 1, 0, 0, 0, 0);
+  runTest("AND", 0b100, 0, 1, 1, 1, 0, 0);
 
-  // Test Cases for XOR function
-  runTest("XOR (0^0=0)", 0b101, 0, 0, 0, 0, 0);
-  runTest("XOR (0^1=1)", 0b101, 0, 0, 1, 1, 0);
-  runTest("XOR (1^0=1)", 0b101, 0, 1, 0, 1, 0);
-  runTest("XOR (1^1=0)", 0b101, 0, 1, 1, 0, 0);
+  // Test Cases for XOR function (MuxCode: 0b101)
+  runTest("XOR", 0b101, 0, 0, 0, 0, 0, 0);
+  runTest("XOR", 0b101, 0, 0, 1, 1, 0, 0);
+  runTest("XOR", 0b101, 0, 1, 0, 1, 0, 0);
+  runTest("XOR", 0b101, 0, 1, 1, 0, 0, 0);
 
-  // Test Cases for OR function
-  runTest("OR (0|0=0)", 0b000, 0, 0, 0, 0, 0);
-  runTest("OR (0|1=1)", 0b000, 0, 0, 1, 1, 0);
-  runTest("OR (1|0=1)", 0b000, 0, 1, 0, 1, 0);
-  runTest("OR (1|1=1)", 0b000, 0, 1, 1, 1, 0);
+  // Test Cases for OR function (MuxCode: 0b000)
+  runTest("OR", 0b000, 0, 0, 0, 0, 0, 0);
+  runTest("OR", 0b000, 0, 0, 1, 1, 0, 0);
+  runTest("OR", 0b000, 0, 1, 0, 1, 0, 0);
+  runTest("OR", 0b000, 0, 1, 1, 1, 0, 0);
 
   Serial.println("--- All test cases have been completed. ---");
-  while(true); // หยุดการทำงาน
+  while(true); // หยุดการทำงานของโปรแกรมหลังจากทดสอบเสร็จสิ้น
 }
