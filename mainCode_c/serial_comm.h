@@ -228,7 +228,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         totalWritten += bytesWritten;
     }
 
-    //ให้บอร์ดมีเวลาตอบ (ปรับตามความเร็วบอร์ด)
+    // ให้บอร์ดมีเวลาตอบ (ปรับค่าได้ตามความเร็วของบอร์ด)
     Sleep(5);
 
     DWORD totalBytesRead = 0;

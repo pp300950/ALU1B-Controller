@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#include "serial_comm.h" // ต้อง include header ของ serial_comm.c
+#include "serial_comm.h" 
 
 // ฟังก์ชันภายใน: ส่งคำสั่ง ALU ไปยัง Arduino
 // muxCode = "000" ถึง "111" (string)
