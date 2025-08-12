@@ -15,6 +15,13 @@
 
 HANDLE hSerial = INVALID_HANDLE_VALUE;
 
+// --- Global Registers and Memory (Hard-coded) ---
+// เราจะใช้ตัวแปรเหล่านี้จำลองการเป็น Register และหน่วยความจำ
+long long REG_A = 0;     // Accumulator Register
+long long REG_B = 0;     // General Purpose Register
+long long MEMORY[10];    // Simple Memory Array
+bool CARRY_FLAG = false; // Carry Flag
+
 // ฟังก์ชันสำหรับแปลงค่าเลขฐานสิบเป็นสตริงฐานสอง
 char *decimalToBinary(long long decimal)
 {
@@ -171,7 +178,6 @@ HANDLE openAndSetupSerialPort()
         goto cleanup;
     }
 
-    // ตั้งค่า timeouts สำหรับการอ่านแบบวนลูป
     timeouts.ReadIntervalTimeout = 100;
     timeouts.ReadTotalTimeoutConstant = READ_TIMEOUT_MS;
     timeouts.ReadTotalTimeoutMultiplier = 0;
@@ -192,7 +198,6 @@ cleanup:
     return INVALID_HANDLE_VALUE;
 }
 
-// ปรับ sendAndReceiveData: เคลียร์ buffer ก่อนเขียน, อย่าเคลียร์หลังเขียน
 bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOutput)
 {
     if (hSerial == INVALID_HANDLE_VALUE)
@@ -212,7 +217,6 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         return false;
     }
 
-    // เคลียร์ข้อมูลเก่าใน buffer ก่อนส่ง (อย่าเคลียร์หลังส่ง)
     clearSerialBuffer();
 
     DWORD dataSize = (DWORD)len;
@@ -228,11 +232,9 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         totalWritten += bytesWritten;
     }
 
-    //ให้บอร์ดมีเวลาตอบ (ปรับตามความเร็วบอร์ด)
     Sleep(5);
 
     DWORD totalBytesRead = 0;
-    // อ่านจนไม่มีข้อมูลเข้ามา (หรือเต็ม buffer)
     do
     {
         if (totalBytesRead >= MAX_READ_BUFFER - 1)
@@ -240,13 +242,11 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         if (ReadFile(hSerial, readBuffer + totalBytesRead, MAX_READ_BUFFER - 1 - totalBytesRead, &bytesRead, NULL) && bytesRead > 0)
         {
             totalBytesRead += bytesRead;
-            // ถ้าเจอ newline อาจหยุดอ่าน (option)
             if (strchr(readBuffer, '\n'))
                 break;
         }
         else
         {
-            // ไม่มีข้อมูลเพิ่ม
             break;
         }
     } while (true);
@@ -254,7 +254,6 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
     readBuffer[totalBytesRead] = '\0';
     if (totalBytesRead > 0)
     {
-        // ตัด newline/CR ออกก่อน sscanf
         for (int i = (int)totalBytesRead - 1; i >= 0; --i)
         {
             if (readBuffer[i] == '\n' || readBuffer[i] == '\r')
@@ -280,7 +279,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
     }
 }
 
-char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
+long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, bool *final_carry)
 {
     int op_mode = 0;
     if (strcmp(op, "ADD") == 0)
@@ -294,7 +293,20 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
     else
     {
         printf("[ERROR] คำสั่งไม่ถูกต้อง\n");
-        return NULL;
+        return 0;
+    }
+
+    char *num1 = decimalToBinary(dec1);
+    char *num2 = decimalToBinary(dec2);
+
+    if (!num1 || !num2)
+    {
+        if (num1)
+            free(num1);
+        if (num2)
+            free(num2);
+        printf("[ERROR] Memory allocation failed\n");
+        return 0;
     }
 
     size_t len1 = strlen(num1);
@@ -304,6 +316,9 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
     char *paddedNum1 = padBinaryString(num1, maxLen);
     char *paddedNum2 = padBinaryString(num2, maxLen);
 
+    free(num1);
+    free(num2);
+
     if (!paddedNum1 || !paddedNum2)
     {
         if (paddedNum1)
@@ -311,23 +326,22 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
         if (paddedNum2)
             free(paddedNum2);
         printf("[ERROR] Memory allocation failed\n");
-        return NULL;
+        return 0;
     }
 
-    // result length = carry(1) + bits(maxLen) + null
-    char *result = (char *)malloc(sizeof(char) * (maxLen + 2)); // Allocate size for potential overflow bit
-    if (!result)
+    char *result_bin = (char *)malloc(sizeof(char) * (maxLen + 2));
+    if (!result_bin)
     {
         free(paddedNum1);
         free(paddedNum2);
         printf("[ERROR] Memory allocation failed\n");
-        return NULL;
+        return 0;
     }
-    result[maxLen + 1] = '\0';
+    result_bin[maxLen + 1] = '\0';
 
     int carry_in = (op_mode == 1) ? 1 : 0;
     int alu_result_sum = 0, alu_carry_sum = 0;
-    // ถ้าคุณต้องการยังเรียก ALU invert จริง ๆ ให้แก้ที่นี่ แต่ตอนนี้ใช้ invert ในซอฟต์แวร์
+
     for (int i = 0; i < (int)maxLen; i++)
     {
         int bitA = paddedNum1[maxLen - 1 - i] - '0';
@@ -338,12 +352,10 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
         int useB = bitB;
         if (op_mode == 1)
         {
-            // invert B ในซอฟต์แวร์ (flip bit) แทนเรียก ALU invert
             useB = 1 - bitB;
             printf("[INFO] ทำการ invert B ในซอฟต์แวร์: B_inv=%d\n", useB);
         }
 
-        // เรียก ALU เพื่อทำ half-adder ของ A กับ useB
         char command_add[32];
         snprintf(command_add, sizeof(command_add), "001 0 %d %d\n", bitA, useB);
         if (!sendAndReceiveData(command_add, &alu_result_sum, &alu_carry_sum))
@@ -351,15 +363,14 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
             printf("[ERROR] Failed to perform operation for bit %d\n", i);
             free(paddedNum1);
             free(paddedNum2);
-            free(result);
-            return NULL;
+            free(result_bin);
+            return 0;
         }
 
-        // full-adder: sum = (a^b)^cin, carry_out = (a&b) | ((a^b)&cin)
         int sum_with_carry = alu_result_sum ^ carry_in;
         int new_carry = (alu_carry_sum) | (alu_result_sum & carry_in);
 
-        result[maxLen - i] = sum_with_carry + '0';
+        result_bin[maxLen - i] = sum_with_carry + '0';
         carry_in = new_carry;
 
         printf("[INFO] ALU half-add: halfSum=%d halfCarry=%d -> sum=%d carry=%d\n",
@@ -369,33 +380,30 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
     free(paddedNum1);
     free(paddedNum2);
 
-    // เก็บ carry-out ที่ตำแหน่ง 0
-    result[0] = carry_in + '0';
+    *final_carry = (carry_in == 1);
+    result_bin[0] = carry_in + '0';
 
-    char *finalResult = NULL;
+    long long finalDecimalResult = 0;
+
     if (op_mode == 1)
-    { // ถ้าเป็นคำสั่ง SUB
+    {
         if (carry_in == 1)
-        { // A >= B (ผลลัพธ์เป็นบวก)
+        {
             *isNeg = false;
-            // ตัดบิต carry_out ที่เกินมาทิ้ง
-            // ผลลัพธ์ที่ถูกต้องคือ result[1..maxLen]
-            finalResult = (char *)malloc(sizeof(char) * (maxLen + 1));
-            strncpy(finalResult, result + 1, maxLen);
-            finalResult[maxLen] = '\0';
+            char temp_result[maxLen + 1];
+            strncpy(temp_result, result_bin + 1, maxLen);
+            temp_result[maxLen] = '\0';
+            finalDecimalResult = binaryToDecimal(temp_result);
         }
         else
-        { // A < B (ผลลัพธ์เป็นลบ)
+        {
             *isNeg = true;
-            // ทำ two's complement ของผลลัพธ์เพื่อได้ค่า magnitude
             char *magnitude = (char *)malloc(sizeof(char) * (maxLen + 1));
-            // Invert bits
             for (size_t i = 1; i <= maxLen; i++)
             {
-                magnitude[i - 1] = (result[i] == '0') ? '1' : '0';
+                magnitude[i - 1] = (result_bin[i] == '0') ? '1' : '0';
             }
             magnitude[maxLen] = '\0';
-            // Add 1
             int carry = 1;
             for (int i = (int)maxLen - 1; i >= 0; i--)
             {
@@ -404,23 +412,26 @@ char *binaryOp(const char *num1, const char *num2, const char *op, bool *isNeg)
                 carry = bit & carry;
                 magnitude[i] = sum + '0';
             }
-            finalResult = magnitude;
+            finalDecimalResult = binaryToDecimal(magnitude);
+            free(magnitude);
         }
     }
     else
-    { // ถ้าเป็นคำสั่ง ADD
+    {
         *isNeg = false;
-        // ตัดบิต carry_out ทิ้งหากไม่ต้องการให้ผลลัพธ์เกินขนาด
-        // หรือเก็บไว้หากต้องการให้รองรับ overflow
-        finalResult = _strdup(result);
+        char temp_result[maxLen + 1];
+        strncpy(temp_result, result_bin + 1, maxLen);
+        temp_result[maxLen] = '\0';
+        finalDecimalResult = binaryToDecimal(temp_result);
     }
 
-    free(result); // Free the temporary result
-
-    return finalResult;
+    free(result_bin);
+    return finalDecimalResult;
 }
 
-// เรียก arduino-cli
+// -----------------------------------------------------------
+// ฟังก์ชันสำหรับเรียก Arduino CLI (ต้องอยู่ในไฟล์เดียวกัน)
+// -----------------------------------------------------------
 bool executeArduinoCLI(const char *cliPath, const char *board, const char *port, const char *inoPath)
 {
     char commandLine[1024];
@@ -458,6 +469,215 @@ bool executeArduinoCLI(const char *cliPath, const char *board, const char *port,
     return true;
 }
 
+// -----------------------------------------------------------
+// คำสั่งจำลองภาษา Assembly
+// -----------------------------------------------------------
+typedef struct
+{
+    char instruction[10];
+    char operand1[50];
+    char operand2[10];
+    char label[20];
+} Instruction;
+
+// เพิ่มฟังก์ชัน helper เพื่อแปลงชื่อรีจิสเตอร์เป็นค่าตัวแปร
+long long getRegisterValue(const char *regName)
+{
+    if (strcmp(regName, "REG_A") == 0)
+    {
+        return REG_A;
+    }
+    if (strcmp(regName, "REG_B") == 0)
+    {
+        return REG_B;
+    }
+    return 0;
+}
+
+// เพิ่มฟังก์ชัน helper เพื่อตั้งค่ารีจิสเตอร์
+void setRegisterValue(const char *regName, long long value)
+{
+    if (strcmp(regName, "REG_A") == 0)
+    {
+        REG_A = value;
+    }
+    if (strcmp(regName, "REG_B") == 0)
+    {
+        REG_B = value;
+    }
+}
+
+// โค้ดฟังก์ชัน executeInstructions ที่แก้ไขแล้ว
+void executeInstructions(Instruction *instructions, int numInstructions)
+{
+    int pc = 0; // Program Counter
+    while (pc < numInstructions)
+    {
+        Instruction current = instructions[pc];
+
+        printf("\n[PC:%02d] กำลังรันคำสั่ง: %s", pc, current.instruction);
+        if (strlen(current.operand1) > 0)
+            printf(" %s", current.operand1);
+        if (strlen(current.operand2) > 0)
+            printf(" %s", current.operand2);
+        printf("\n");
+
+        if (strlen(current.label) > 0)
+        {
+            // Do nothing, just a label
+        }
+        // คำสั่งใหม่: DEF (Define)
+        else if (strcmp(current.instruction, "DEF") == 0)
+        {
+            int mem_addr = atoi(current.operand1);
+            long long value = atoll(current.operand2); // ใช้ atoll สำหรับ long long
+            MEMORY[mem_addr] = value;
+            printf("[INFO] DEFINE: กำหนดค่า %lld ให้กับ MEMORY[%d]\n", value, mem_addr);
+        }
+        // คำสั่งใหม่: PRINT
+        else if (strcmp(current.instruction, "PRINT") == 0)
+        {
+            // กรณีที่ 1: มีข้อความและรีจิสเตอร์ (e.g., {"PRINT", "ผลลัพธ์คือ", "REG_A"})
+            if (strcmp(current.operand2, "REG_A") == 0)
+            {
+                printf("[INFO] PRINT: %s %lld\n", current.operand1, REG_A);
+            }
+            else if (strcmp(current.operand2, "REG_B") == 0)
+            {
+                printf("[INFO] PRINT: %s %lld\n", current.operand1, REG_B);
+            }
+            // กรณีที่ 2: แสดงผลแค่รีจิสเตอร์อย่างเดียว (e.g., {"PRINT", "REG_A", ""})
+            else if (strcmp(current.operand1, "REG_A") == 0)
+            {
+                printf("[INFO] PRINT: ค่าใน REG_A คือ %lld\n", REG_A);
+            }
+            else if (strcmp(current.operand1, "REG_B") == 0)
+            {
+                printf("[INFO] PRINT: ค่าใน REG_B คือ %lld\n", REG_B);
+            }
+            // กรณีที่ 3: แสดงผลจาก Memory (e.g., {"PRINT", "0", ""})
+            else
+            {
+                bool isNumber = true;
+                for (int i = 0; i < strlen(current.operand1); i++)
+                {
+                    if (!isdigit(current.operand1[i]))
+                    {
+                        isNumber = false;
+                        break;
+                    }
+                }
+
+                if (isNumber)
+                {
+                    int mem_addr = atoi(current.operand1);
+                    printf("[INFO] PRINT: ค่าใน MEMORY[%d] คือ %lld\n", mem_addr, MEMORY[mem_addr]);
+                }
+                // กรณีที่ 4: แสดงผลแค่ข้อความ (e.g., {"PRINT", "สวัสดี", ""})
+                else
+                {
+                    printf("[INFO] PRINT: %s\n", current.operand1);
+                }
+            }
+        }
+        else if (strcmp(current.instruction, "LOAD") == 0)
+        {
+            int mem_addr = atoi(current.operand2);
+            if (strcmp(current.operand1, "REG_A") == 0)
+            {
+                REG_A = MEMORY[mem_addr];
+                printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_A\n", REG_A, mem_addr);
+            }
+            else if (strcmp(current.operand1, "REG_B") == 0)
+            {
+                REG_B = MEMORY[mem_addr];
+                printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_B\n", REG_B, mem_addr);
+            }
+        }
+        else if (strcmp(current.instruction, "STORE") == 0)
+        {
+            int mem_addr = atoi(current.operand2);
+            if (strcmp(current.operand1, "REG_A") == 0)
+            {
+                MEMORY[mem_addr] = REG_A;
+                printf("[INFO] STORE %lld จาก REG_A ไปยัง MEMORY[%d]\n", REG_A, mem_addr);
+            }
+            else if (strcmp(current.operand1, "REG_B") == 0)
+            {
+                MEMORY[mem_addr] = REG_B;
+                printf("[INFO] STORE %lld จาก REG_B ไปยัง MEMORY[%d]\n", REG_B, mem_addr);
+            }
+        }
+        // คำสั่ง ADD ที่ต้องระบุ Operand
+        else if (strcmp(current.instruction, "ADD") == 0)
+        {
+            long long op1_val = getRegisterValue(current.operand1);
+            long long op2_val = getRegisterValue(current.operand2);
+            printf("[INFO] กำลังประมวลผล %s + %s\n", current.operand1, current.operand2);
+            bool isNeg = false;
+            long long result = binaryOp(op1_val, op2_val, "ADD", &isNeg, &CARRY_FLAG);
+            setRegisterValue(current.operand1, result); // เก็บผลลัพธ์ใน operand1
+            printf("[INFO] ผลลัพธ์ ADD: %s = %lld, CARRY_FLAG = %s\n", current.operand1, result, CARRY_FLAG ? "true" : "false");
+        }
+        // คำสั่ง SUB ที่ต้องระบุ Operand
+        else if (strcmp(current.instruction, "SUB") == 0)
+        {
+            long long op1_val = getRegisterValue(current.operand1);
+            long long op2_val = getRegisterValue(current.operand2);
+            printf("[INFO] กำลังประมวลผล %s - %s\n", current.operand1, current.operand2);
+            bool isNeg = false;
+            long long result = binaryOp(op1_val, op2_val, "SUB", &isNeg, &CARRY_FLAG);
+            setRegisterValue(current.operand1, result); // เก็บผลลัพธ์ใน operand1
+            printf("[INFO] ผลลัพธ์ SUB: %s = %lld, CARRY_FLAG = %s, IsNegative = %s\n", current.operand1, result, CARRY_FLAG ? "true" : "false", isNeg ? "true" : "false");
+        }
+        else if (strcmp(current.instruction, "JMP") == 0)
+        {
+            char *label = current.operand1;
+            printf("[INFO] คำสั่ง JMP. กำลังค้นหา Label: %s\n", label);
+            for (int i = 0; i < numInstructions; i++)
+            {
+                if (strcmp(instructions[i].label, label) == 0)
+                {
+                    pc = i - 1; // -1 เพราะจะถูก ++ ที่ท้ายลูป
+                    printf("[INFO] พบ Label '%s' ที่บรรทัด %d. กำลัง Jump.\n", label, pc + 1);
+                    break;
+                }
+            }
+        }
+        else if (strcmp(current.instruction, "JNC") == 0)
+        {
+            if (!CARRY_FLAG)
+            {
+                char *label = current.operand1;
+                printf("[INFO] คำสั่ง JNC. CARRY_FLAG = false. กำลัง Jump ไปที่ Label: %s\n", label);
+                for (int i = 0; i < numInstructions; i++)
+                {
+                    if (strcmp(instructions[i].label, label) == 0)
+                    {
+                        pc = i - 1;
+                        printf("[INFO] พบ Label '%s' ที่บรรทัด %d. กำลัง Jump.\n", label, pc + 1);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                printf("[INFO] คำสั่ง JNC. CARRY_FLAG = true. ไม่มีการ Jump.\n");
+            }
+        }
+        else if (strcmp(current.instruction, "HLT") == 0)
+        {
+            printf("[INFO] คำสั่ง HLT. หยุดการทำงาน.\n");
+            break;
+        }
+
+        pc++;
+    }
+}
+
+// -----------------------------------------------------------
+// Main
+// -----------------------------------------------------------
 int main()
 {
     SetConsoleOutputCP(CP_UTF8);
@@ -468,6 +688,7 @@ int main()
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
+    // Call the function here
     if (!executeArduinoCLI(arduinoCliPath, boardType, COM_PORT, inoFilePath))
     {
         return 1;
@@ -482,75 +703,49 @@ int main()
         return 1;
     }
 
-    char op[10];
-    long long dec1, dec2;
+    printf("\n--- เริ่มต้นการทำงานของโปรแกรมจำลอง Assembly ---\n");
 
-    printf("โปรดป้อนคำสั่ง (ADD/SUB) ตามด้วยเลขฐานสิบสองตัว (เช่น ADD 23 15):\n");
-    if (scanf("%s %lld %lld", op, &dec1, &dec2) != 3)
-    {
-        printf("[ERROR] รูปแบบอินพุตไม่ถูกต้อง\n");
-        CloseHandle(hSerial);
-        return 1;
-    }
+    // ตัวอย่างโปรแกรมจำลอง
+    Instruction program[] = {
+        // กำหนดค่าเริ่มต้นให้กับ Memory
+        {"DEF", "0", "50"}, // Memory[0] = 50
+        {"DEF", "1", "45"}, // Memory[1] = 45
+        {"DEF", "2", "1"},  // Memory[2] = 1
 
-    char *num1 = decimalToBinary(dec1);
-    char *num2 = decimalToBinary(dec2);
+        // ทำการคำนวณ (50 - 45) + 1
+        {"LOAD", "REG_A", "0"}, // REG_A = Memory[0] (50)
+        {"LOAD", "REG_B", "1"}, // REG_B = Memory[1] (45)
+        {"SUB", "REG_A", "REG_B"},
+        {"PRINT", "ผลลัพธ์ SUB", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
+        {"ADD", "REG_A", "REG_B"},
+        {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
+        {"HLT", "", ""}
 
-    if (!num1 || !num2)
-    {
-        printf("[ERROR] Memory allocation failed\n");
-        if (num1)
-            free(num1);
-        if (num2)
-            free(num2);
-        CloseHandle(hSerial);
-        return 1;
-    }
+        /*
+        Instruction program[] = {
+            // กำหนดค่าเริ่มต้น
+            {"DEF", "0", "5"},      // Memory[0] = 5
+            {"LOAD", "REG_A", "0"}, // REG_A = 5
 
-    bool isNegative = false;
-    char *result = binaryOp(num1, num2, op, &isNegative);
+            // เริ่มต้นลูป
+            {"", "", "", "LOOP_START"},      // Label สำหรับจุดเริ่มต้นของการวนลูป
+            {"PRINT", "นับถอยหลัง:", "REG_A"}, // แสดงค่าใน REG_A
+            {"DEF", "1", "1"},               // Memory[1] = 1 (ค่าคงที่สำหรับลบ)
+            {"LOAD", "REG_B", "1"},          // REG_B = 1
+            {"SUB", "REG_A", "REG_B"},       // REG_A = REG_A - REG_B (ค่าลดลงทีละ 1)
 
-    if (result != NULL)
-    {
-        printf("\n--- ผลลัพธ์สุดท้าย ---\n");
-        printf("คำสั่ง: %s\n", op);
+            // ตรวจสอบเงื่อนไข
+            {"JNC", "LOOP_START", ""}, // ถ้า CARRY_FLAG เป็น false (ผลลัพธ์ไม่ติดลบ) ให้กระโดดกลับไปที่ LOOP_START
 
-        long long decResult = binaryToDecimal(result);
+            {"HLT", "", ""} // หยุดการทำงานเมื่อลูปจบ
+        };
+        */
+    };
 
-        printf("  %s (ฐาน 2) = %lld (ฐาน 10)\n", num1, dec1);
+    int numInstructions = sizeof(program) / sizeof(Instruction);
+    executeInstructions(program, numInstructions);
 
-        if (strcmp(op, "SUB") == 0)
-        {
-            printf("- %s (ฐาน 2) = %lld (ฐาน 10)\n", num2, dec2);
-        }
-        else
-        {
-            printf("+ %s (ฐาน 2) = %lld (ฐาน 10)\n", num2, dec2);
-        }
-
-        printf("---------------------\n");
-
-        if (isNegative)
-        {
-            printf("  -%s (ฐาน 2) = -%lld (ฐาน 10)\n", result, decResult);
-        }
-        else
-        {
-            printf("  %s (ฐาน 2) = %lld (ฐาน 10)\n", result, decResult);
-        }
-
-        free(result);
-        free(num1);
-        free(num2);
-    }
-    else
-    {
-        printf("[ERROR] ไม่สามารถคำนวณได้\n");
-        if (num1)
-            free(num1);
-        if (num2)
-            free(num2);
-    }
+    printf("\n--- สิ้นสุดการทำงานของโปรแกรม ---\n");
 
     clearSerialBuffer();
     CloseHandle(hSerial);
