@@ -476,9 +476,13 @@ typedef struct
 {
     char instruction[10];
     char operand1[50];
-    char operand2[10];
+    char operand2[50];
     char label[20];
 } Instruction;
+
+// Global Flags
+bool ZERO_FLAG = false;
+bool SIGN_FLAG = false; // สำหรับบอกว่าผลลัพธ์เป็นค่าติดลบหรือไม่
 
 // เพิ่มฟังก์ชัน helper เพื่อแปลงชื่อรีจิสเตอร์เป็นค่าตัวแปร
 long long getRegisterValue(const char *regName)
@@ -507,13 +511,123 @@ void setRegisterValue(const char *regName, long long value)
     }
 }
 
-// โค้ดฟังก์ชัน executeInstructions ที่แก้ไขแล้ว
+long long logicOp(long long op1, long long op2, const char *op, bool *zeroFlag, bool *signFlag)
+{
+    long long result = 0;
+    if (strcmp(op, "AND") == 0)
+    {
+        result = op1 & op2;
+    }
+    else if (strcmp(op, "OR") == 0)
+    {
+        result = op1 | op2;
+    }
+    else if (strcmp(op, "XOR") == 0)
+    {
+        result = op1 ^ op2;
+    }
+    else if (strcmp(op, "NOT") == 0) // NOT เป็น unary op
+    {
+        result = ~op1;
+    }
+
+    *zeroFlag = (result == 0);
+    *signFlag = (result < 0);
+    return result;
+}
+
+long long shiftOp(long long value, int shiftCount, const char *op, bool *carryFlag, bool *zeroFlag, bool *signFlag)
+{
+    long long result = 0;
+    if (strcmp(op, "SHL") == 0)
+    {
+        *carryFlag = (value >> (64 - shiftCount)) & 1;
+        result = value << shiftCount;
+    }
+    else if (strcmp(op, "SHR") == 0)
+    {
+        *carryFlag = (value >> (shiftCount - 1)) & 1;
+        result = value >> shiftCount;
+    }
+    *zeroFlag = (result == 0);
+    *signFlag = (result < 0);
+    return result;
+}
+
+#define STACK_SIZE 1024
+long long STACK[STACK_SIZE];
+int sp = -1; // Stack Pointer
+// เพิ่มฟังก์ชัน PUSH และ POP
+void push(long long value)
+{
+    if (sp < STACK_SIZE - 1)
+    {
+        STACK[++sp] = value;
+        printf("[STACK] PUSH: %lld at stack[%d]\n", value, sp);
+    }
+    else
+    {
+        printf("[ERROR] Stack overflow!\n");
+    }
+}
+long long pop()
+{
+    if (sp >= 0)
+    {
+        printf("[STACK] POP: %lld from stack[%d]\n", STACK[sp], sp);
+        return STACK[sp--];
+    }
+    else
+    {
+        printf("[ERROR] Stack underflow!\n");
+        return 0;
+    }
+}
+
+long long getOperandValue(const char *operand)
+{
+    if (strcmp(operand, "REG_A") == 0)
+    {
+        return REG_A;
+    }
+    if (strcmp(operand, "REG_B") == 0)
+    {
+        return REG_B;
+    }
+    // ถ้าไม่ใช่ Register ให้ลองแปลงเป็นตัวเลข
+    return atoll(operand);
+}
 void executeInstructions(Instruction *instructions, int numInstructions)
 {
+    // สร้างแผนที่ Label -> Index เพื่อเพิ่มความเร็วในการ Jump
+    struct LabelMap
+    {
+        char label[20];
+        int index;
+    };
+    struct LabelMap labelMap[numInstructions];
+    int labelCount = 0;
+
+    printf("[INFO] กำลังสร้างแผนที่ Label...\n");
+    for (int i = 0; i < numInstructions; i++)
+    {
+        if (strlen(instructions[i].label) > 0)
+        {
+            if (labelCount < numInstructions)
+            {
+                strcpy(labelMap[labelCount].label, instructions[i].label);
+                labelMap[labelCount].index = i;
+                printf("[DEBUG] พบ Label: '%s' ที่บรรทัด %d\n", labelMap[labelCount].label, labelMap[labelCount].index);
+                labelCount++;
+            }
+        }
+    }
+
     int pc = 0; // Program Counter
     while (pc < numInstructions)
     {
         Instruction current = instructions[pc];
+        bool shouldJump = false;
 
         printf("\n[PC:%02d] กำลังรันคำสั่ง: %s", pc, current.instruction);
         if (strlen(current.operand1) > 0)
@@ -526,120 +640,115 @@ void executeInstructions(Instruction *instructions, int numInstructions)
         {
             // Do nothing, just a label
         }
-        // คำสั่งใหม่: DEF (Define)
         else if (strcmp(current.instruction, "DEF") == 0)
         {
             int mem_addr = atoi(current.operand1);
-            long long value = atoll(current.operand2); // ใช้ atoll สำหรับ long long
-            MEMORY[mem_addr] = value;
-            printf("[INFO] DEFINE: กำหนดค่า %lld ให้กับ MEMORY[%d]\n", value, mem_addr);
-        }
-        // คำสั่งใหม่: PRINT
-        else if (strcmp(current.instruction, "PRINT") == 0)
-        {
-            // กรณีที่ 1: มีข้อความและรีจิสเตอร์ (e.g., {"PRINT", "ผลลัพธ์คือ", "REG_A"})
-            if (strcmp(current.operand2, "REG_A") == 0)
+            long long value = atoll(current.operand2);
+            if (mem_addr >= 0 && mem_addr < 10)
             {
-                printf("[INFO] PRINT: %s %lld\n", current.operand1, REG_A);
+                MEMORY[mem_addr] = value;
+                printf("[INFO] DEFINE: กำหนดค่า %lld ให้กับ MEMORY[%d]\n", value, mem_addr);
             }
-            else if (strcmp(current.operand2, "REG_B") == 0)
-            {
-                printf("[INFO] PRINT: %s %lld\n", current.operand1, REG_B);
-            }
-            // กรณีที่ 2: แสดงผลแค่รีจิสเตอร์อย่างเดียว (e.g., {"PRINT", "REG_A", ""})
-            else if (strcmp(current.operand1, "REG_A") == 0)
-            {
-                printf("[INFO] PRINT: ค่าใน REG_A คือ %lld\n", REG_A);
-            }
-            else if (strcmp(current.operand1, "REG_B") == 0)
-            {
-                printf("[INFO] PRINT: ค่าใน REG_B คือ %lld\n", REG_B);
-            }
-            // กรณีที่ 3: แสดงผลจาก Memory (e.g., {"PRINT", "0", ""})
             else
             {
-                bool isNumber = true;
-                for (int i = 0; i < strlen(current.operand1); i++)
-                {
-                    if (!isdigit(current.operand1[i]))
-                    {
-                        isNumber = false;
-                        break;
-                    }
-                }
-
-                if (isNumber)
-                {
-                    int mem_addr = atoi(current.operand1);
-                    printf("[INFO] PRINT: ค่าใน MEMORY[%d] คือ %lld\n", mem_addr, MEMORY[mem_addr]);
-                }
-                // กรณีที่ 4: แสดงผลแค่ข้อความ (e.g., {"PRINT", "สวัสดี", ""})
-                else
-                {
-                    printf("[INFO] PRINT: %s\n", current.operand1);
-                }
+                printf("[ERROR] Memory Out-of-Bounds: ไม่สามารถเข้าถึง MEMORY[%d] ได้\n", mem_addr);
             }
         }
         else if (strcmp(current.instruction, "LOAD") == 0)
         {
             int mem_addr = atoi(current.operand2);
-            if (strcmp(current.operand1, "REG_A") == 0)
+            if (mem_addr >= 0 && mem_addr < 10)
             {
-                REG_A = MEMORY[mem_addr];
-                printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_A\n", REG_A, mem_addr);
+                if (strcmp(current.operand1, "REG_A") == 0)
+                {
+                    REG_A = MEMORY[mem_addr];
+                    printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_A\n", REG_A, mem_addr);
+                }
+                else if (strcmp(current.operand1, "REG_B") == 0)
+                {
+                    REG_B = MEMORY[mem_addr];
+                    printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_B\n", REG_B, mem_addr);
+                }
             }
-            else if (strcmp(current.operand1, "REG_B") == 0)
+            else
             {
-                REG_B = MEMORY[mem_addr];
-                printf("[INFO] LOAD %lld จาก MEMORY[%d] เข้าสู่ REG_B\n", REG_B, mem_addr);
+                printf("[ERROR] Memory Out-of-Bounds: ไม่สามารถเข้าถึง MEMORY[%d] ได้\n", mem_addr);
             }
         }
         else if (strcmp(current.instruction, "STORE") == 0)
         {
             int mem_addr = atoi(current.operand2);
-            if (strcmp(current.operand1, "REG_A") == 0)
+            if (mem_addr >= 0 && mem_addr < 10)
             {
-                MEMORY[mem_addr] = REG_A;
-                printf("[INFO] STORE %lld จาก REG_A ไปยัง MEMORY[%d]\n", REG_A, mem_addr);
+                if (strcmp(current.operand1, "REG_A") == 0)
+                {
+                    MEMORY[mem_addr] = REG_A;
+                    printf("[INFO] STORE %lld จาก REG_A ไปยัง MEMORY[%d]\n", REG_A, mem_addr);
+                }
+                else if (strcmp(current.operand1, "REG_B") == 0)
+                {
+                    MEMORY[mem_addr] = REG_B;
+                    printf("[INFO] STORE %lld จาก REG_B ไปยัง MEMORY[%d]\n", REG_B, mem_addr);
+                }
             }
-            else if (strcmp(current.operand1, "REG_B") == 0)
+            else
             {
-                MEMORY[mem_addr] = REG_B;
-                printf("[INFO] STORE %lld จาก REG_B ไปยัง MEMORY[%d]\n", REG_B, mem_addr);
+                printf("[ERROR] Memory Out-of-Bounds: ไม่สามารถเข้าถึง MEMORY[%d] ได้\n", mem_addr);
             }
         }
-        // คำสั่ง ADD ที่ต้องระบุ Operand
+        else if (strcmp(current.instruction, "MOV") == 0)
+        {
+            long long value = getOperandValue(current.operand2);
+            setRegisterValue(current.operand1, value);
+            printf("[INFO] MOV: ย้ายค่า %lld ไปยัง %s\n", value, current.operand1);
+        }
         else if (strcmp(current.instruction, "ADD") == 0)
         {
             long long op1_val = getRegisterValue(current.operand1);
-            long long op2_val = getRegisterValue(current.operand2);
+            long long op2_val = getOperandValue(current.operand2);
             printf("[INFO] กำลังประมวลผล %s + %s\n", current.operand1, current.operand2);
             bool isNeg = false;
             long long result = binaryOp(op1_val, op2_val, "ADD", &isNeg, &CARRY_FLAG);
-            setRegisterValue(current.operand1, result); // เก็บผลลัพธ์ใน operand1
-            printf("[INFO] ผลลัพธ์ ADD: %s = %lld, CARRY_FLAG = %s\n", current.operand1, result, CARRY_FLAG ? "true" : "false");
+            setRegisterValue(current.operand1, result);
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = (result < 0);
+            printf("[INFO] ผลลัพธ์ ADD: %s = %lld, CARRY_FLAG = %s, ZERO_FLAG = %s, SIGN_FLAG = %s\n",
+                   current.operand1, result, CARRY_FLAG ? "true" : "false", ZERO_FLAG ? "true" : "false", SIGN_FLAG ? "true" : "false");
         }
-        // คำสั่ง SUB ที่ต้องระบุ Operand
         else if (strcmp(current.instruction, "SUB") == 0)
         {
             long long op1_val = getRegisterValue(current.operand1);
-            long long op2_val = getRegisterValue(current.operand2);
+            long long op2_val = getOperandValue(current.operand2);
             printf("[INFO] กำลังประมวลผล %s - %s\n", current.operand1, current.operand2);
             bool isNeg = false;
             long long result = binaryOp(op1_val, op2_val, "SUB", &isNeg, &CARRY_FLAG);
-            setRegisterValue(current.operand1, result); // เก็บผลลัพธ์ใน operand1
-            printf("[INFO] ผลลัพธ์ SUB: %s = %lld, CARRY_FLAG = %s, IsNegative = %s\n", current.operand1, result, CARRY_FLAG ? "true" : "false", isNeg ? "true" : "false");
+            setRegisterValue(current.operand1, result);
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = isNeg;
+            printf("[INFO] ผลลัพธ์ SUB: %s = %lld, CARRY_FLAG = %s, ZERO_FLAG = %s, SIGN_FLAG = %s\n",
+                   current.operand1, result, CARRY_FLAG ? "true" : "false", ZERO_FLAG ? "true" : "false", SIGN_FLAG ? "true" : "false");
+        }
+        else if (strcmp(current.instruction, "CMP") == 0)
+        {
+            long long op1_val = getOperandValue(current.operand1);
+            long long op2_val = getOperandValue(current.operand2);
+            long long result = op1_val - op2_val;
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = (result < 0);
+            CARRY_FLAG = (op1_val < op2_val);
+            printf("[INFO] CMP: %lld กับ %lld. Z=%s, S=%s, C=%s\n",
+                   op1_val, op2_val, ZERO_FLAG ? "true" : "false", SIGN_FLAG ? "true" : "false", CARRY_FLAG ? "true" : "false");
         }
         else if (strcmp(current.instruction, "JMP") == 0)
         {
             char *label = current.operand1;
-            printf("[INFO] คำสั่ง JMP. กำลังค้นหา Label: %s\n", label);
-            for (int i = 0; i < numInstructions; i++)
+            for (int i = 0; i < labelCount; i++)
             {
-                if (strcmp(instructions[i].label, label) == 0)
+                if (strcmp(labelMap[i].label, label) == 0)
                 {
-                    pc = i - 1; // -1 เพราะจะถูก ++ ที่ท้ายลูป
-                    printf("[INFO] พบ Label '%s' ที่บรรทัด %d. กำลัง Jump.\n", label, pc + 1);
+                    pc = labelMap[i].index;
+                    shouldJump = true;
+                    printf("[INFO] คำสั่ง JMP. กระโดดไปที่ Label '%s' (บรรทัด %d)\n", label, pc);
                     break;
                 }
             }
@@ -649,20 +758,62 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             if (!CARRY_FLAG)
             {
                 char *label = current.operand1;
-                printf("[INFO] คำสั่ง JNC. CARRY_FLAG = false. กำลัง Jump ไปที่ Label: %s\n", label);
-                for (int i = 0; i < numInstructions; i++)
+                for (int i = 0; i < labelCount; i++)
                 {
-                    if (strcmp(instructions[i].label, label) == 0)
+                    if (strcmp(labelMap[i].label, label) == 0)
                     {
-                        pc = i - 1;
-                        printf("[INFO] พบ Label '%s' ที่บรรทัด %d. กำลัง Jump.\n", label, pc + 1);
+                        pc = labelMap[i].index;
+                        shouldJump = true;
+                        printf("[INFO] คำสั่ง JNC. กระโดดไปที่ Label '%s' (บรรทัด %d)\n", label, pc);
                         break;
                     }
                 }
             }
             else
             {
-                printf("[INFO] คำสั่ง JNC. CARRY_FLAG = true. ไม่มีการ Jump.\n");
+                printf("[INFO] คำสั่ง JNC. CARRY_FLAG = true. ไม่มีการกระโดด.\n");
+            }
+        }
+        else if (strcmp(current.instruction, "JZ") == 0)
+        {
+            if (ZERO_FLAG)
+            {
+                char *label = current.operand1;
+                for (int i = 0; i < labelCount; i++)
+                {
+                    if (strcmp(labelMap[i].label, label) == 0)
+                    {
+                        pc = labelMap[i].index;
+                        shouldJump = true;
+                        printf("[INFO] คำสั่ง JZ. กระโดดไปที่ Label '%s' (บรรทัด %d)\n", label, pc);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                printf("[INFO] คำสั่ง JZ. ZERO_FLAG = false. ไม่มีการกระโดด.\n");
+            }
+        }
+        else if (strcmp(current.instruction, "JNZ") == 0)
+        {
+            if (!ZERO_FLAG)
+            {
+                char *label = current.operand1;
+                for (int i = 0; i < labelCount; i++)
+                {
+                    if (strcmp(labelMap[i].label, label) == 0)
+                    {
+                        pc = labelMap[i].index;
+                        shouldJump = true;
+                        printf("[INFO] คำสั่ง JNZ. กระโดดไปที่ Label '%s' (บรรทัด %d)\n", label, pc);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                printf("[INFO] คำสั่ง JNZ. ZERO_FLAG = true. ไม่มีการกระโดด.\n");
             }
         }
         else if (strcmp(current.instruction, "HLT") == 0)
@@ -671,10 +822,12 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             break;
         }
 
-        pc++;
+        if (!shouldJump)
+        {
+            pc++;
+        }
     }
 }
-
 // -----------------------------------------------------------
 // Main
 // -----------------------------------------------------------
@@ -706,41 +859,86 @@ int main()
     printf("\n--- เริ่มต้นการทำงานของโปรแกรมจำลอง Assembly ---\n");
 
     // ตัวอย่างโปรแกรมจำลอง
+    /*  Instruction program[] = {
+          // กำหนดค่าเริ่มต้นให้กับ Memory
+           {"DEF", "0", "50"}, // Memory[0] = 50
+           {"DEF", "1", "45"}, // Memory[1] = 45
+           {"DEF", "2", "1"},  // Memory[2] = 1
+
+           // ทำการคำนวณ (50 - 45) + 1
+           {"LOAD", "REG_A", "0"}, // REG_A = Memory[0] (50)
+           {"LOAD", "REG_B", "1"}, // REG_B = Memory[1] (45)
+           {"SUB", "REG_A", "REG_B"},
+           {"PRINT", "ผลลัพธ์ SUB", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
+           {"ADD", "REG_A", "REG_B"},
+           {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
+           {"HLT", "", ""}};
+           */
+
     Instruction program[] = {
-        // กำหนดค่าเริ่มต้นให้กับ Memory
-        {"DEF", "0", "50"}, // Memory[0] = 50
-        {"DEF", "1", "45"}, // Memory[1] = 45
-        {"DEF", "2", "1"},  // Memory[2] = 1
+        // --- การกำหนดค่าเริ่มต้น ---
+        {"DEF", "0", "5"},      // Memory[0] = 5
+        {"DEF", "1", "3"},      // Memory[1] = 3
+        {"DEF", "2", "10"},     // Memory[2] = 10
+        {"LOAD", "REG_A", "0"}, // REG_A = 5
+        {"LOAD", "REG_B", "1"}, // REG_B = 3
 
-        // ทำการคำนวณ (50 - 45) + 1
-        {"LOAD", "REG_A", "0"}, // REG_A = Memory[0] (50)
-        {"LOAD", "REG_B", "1"}, // REG_B = Memory[1] (45)
-        {"SUB", "REG_A", "REG_B"},
-        {"PRINT", "ผลลัพธ์ SUB", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
-        {"ADD", "REG_A", "REG_B"},
-        {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
-        {"HLT", "", ""}
+        // --- ทดสอบ ADD ---
+        {"ADD", "REG_A", "REG_B"}, // REG_A = 5 + 3 = 8
 
-        /*
-        Instruction program[] = {
-            // กำหนดค่าเริ่มต้น
-            {"DEF", "0", "5"},      // Memory[0] = 5
-            {"LOAD", "REG_A", "0"}, // REG_A = 5
+        // --- ทดสอบ STORE ---
+        {"STORE", "2", "REG_A"}, // Memory[2] = 8
 
-            // เริ่มต้นลูป
-            {"", "", "", "LOOP_START"},      // Label สำหรับจุดเริ่มต้นของการวนลูป
-            {"PRINT", "นับถอยหลัง:", "REG_A"}, // แสดงค่าใน REG_A
-            {"DEF", "1", "1"},               // Memory[1] = 1 (ค่าคงที่สำหรับลบ)
-            {"LOAD", "REG_B", "1"},          // REG_B = 1
-            {"SUB", "REG_A", "REG_B"},       // REG_A = REG_A - REG_B (ค่าลดลงทีละ 1)
+        // --- ทดสอบ MOV ---
+        {"MOV", "REG_C", "REG_B"}, // REG_C = REG_B (3)
 
-            // ตรวจสอบเงื่อนไข
-            {"JNC", "LOOP_START", ""}, // ถ้า CARRY_FLAG เป็น false (ผลลัพธ์ไม่ติดลบ) ให้กระโดดกลับไปที่ LOOP_START
+        // --- ทดสอบ CMP และ JZ ---
+        {"CMP", "REG_A", "REG_C"}, // 8 vs 3 → ไม่เท่ากัน → ZERO_FLAG = 0
+        {"JZ", "EQUAL_LABEL", ""}, // ข้ามไปไม่ได้เพราะไม่เท่ากัน
 
-            {"HLT", "", ""} // หยุดการทำงานเมื่อลูปจบ
-        };
-        */
-    };
+        // --- ทดสอบ SUB ---
+        {"SUB", "REG_A", "REG_B"}, // 8 - 3 = 5
+
+        // --- ทดสอบ JNC (ไม่มี borrow → CARRY_FLAG = 0) ---
+        {"JNC", "NO_CARRY_LABEL", ""},
+
+        // --- Label เมื่อมี carry (จะไม่โดน jump ในรอบนี้) ---
+        {"", "", "", "EQUAL_LABEL"},
+        {"MOV", "REG_D", "REG_C"}, // แค่ตัวอย่าง (จะไม่ถูก execute ในรอบนี้)
+        {"JMP", "AFTER_TESTS", ""},
+
+        // --- Label สำหรับ JNC ---
+        {"", "", "", "NO_CARRY_LABEL"},
+        {"ADD", "REG_A", "REG_B"}, // 5 + 3 = 8 อีกครั้ง
+
+        // --- ทดสอบ JNZ ---
+        {"CMP", "REG_A", "REG_C"}, // 8 vs 3 → ไม่เท่ากัน → ZERO_FLAG = 0
+        {"JNZ", "CONTINUE_LABEL", ""},
+
+        {"MOV", "REG_D", "REG_A"}, // จะไม่ถูก execute เพราะ ZERO_FLAG != 1
+
+        // --- Label สำหรับ JNZ ---
+        {"", "", "", "CONTINUE_LABEL"},
+        {"SUB", "REG_A", "REG_A"}, // REG_A = 0
+        {"CMP", "REG_A", "REG_A"}, // 0 vs 0 → ZERO_FLAG = 1
+        {"JZ", "ZERO_LABEL", ""},
+
+        // --- ถ้าไม่ zero ---
+        {"MOV", "REG_D", "REG_B"},
+
+        // --- Label ZERO ---
+        {"", "", "", "ZERO_LABEL"},
+        {"MOV", "REG_D", "REG_A"}, // REG_D = 0
+
+        // --- ทดสอบ JMP ตรง ๆ ---
+        {"JMP", "END_LABEL", ""},
+
+        {"", "", "", "AFTER_TESTS"},
+        {"MOV", "REG_D", "REG_C"},
+
+        // --- จุดจบโปรแกรม ---
+        {"", "", "", "END_LABEL"},
+        {"HLT", "", ""}};
 
     int numInstructions = sizeof(program) / sizeof(Instruction);
     executeInstructions(program, numInstructions);
