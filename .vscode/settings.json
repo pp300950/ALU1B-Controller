@@ -1,6 +1,9 @@
 {
     "files.associations": {
         "*.embeddedhtml": "html",
-        "ALUSim.C": "cpp"
+        "ALUSim.C": "cpp",
+        "string.h": "c",
+        "stdlib.h": "c",
+        "windows.h": "c"
     }
 }

@@ -163,16 +163,12 @@ void parse_and_execute(const char *high_level_code)
                 if (sscanf(expression, "%s %s %s", operand1, op, operand2) == 3)
                 {
                     int mem_addr_ans = get_or_create_variable(var_name);
+                    int mem_addr_op1 = get_or_create_variable(operand1);
 
-                    int mem_addr_op1 = get_or_create_variable(operand1); // operand1 คือ "ans"
-
-                    // ตรงนี้คือปัญหา: คุณไม่ได้โหลดค่าจาก 'ans' เข้า REG_A อย่างถูกต้อง
-                    // โค้ดในส่วนนี้จะสร้างคำสั่ง LOAD REG_A 0 (สมมติว่า ans อยู่ที่ mem 0)
-                    // แต่ตัวแปร 'ans' ในโค้ดระดับสูงไม่ได้ถูกกำหนดค่าเริ่มต้นให้ '0'
-                    // ดังนั้น เมื่อรันครั้งแรก อาจจะเกิดข้อผิดพลาดในการโหลดค่า
                     sprintf(assembly_program[prog_idx].instruction, "LOAD");
                     sprintf(assembly_program[prog_idx].operand1, "REG_A");
                     sprintf(assembly_program[prog_idx++].operand2, "%d", mem_addr_op1);
+
                     if (atoi(operand2) != 0 || (strlen(operand2) == 1 && operand2[0] == '0'))
                     {
                         sprintf(assembly_program[prog_idx].instruction, "MOV");
@@ -225,7 +221,7 @@ void parse_and_execute(const char *high_level_code)
         // อัปเดตค่าใน high_level_memory ด้วยผลลัพธ์ที่ถูกต้องจาก REG_A
         // โดย MEM[0] เป็นที่อยู่ของตัวแปร 'ans'
         high_level_memory[0].value = final_registers.reg_a;
-
+        
         // แก้ไขส่วนนี้: แสดงผลค่าจาก REG_A และ REG_B โดยตรง
         printf("\n--- ผลลัพธ์สุดท้ายจาก ALU ---\n");
         printf("[INFO] ค่าใน REG_A หลังจากประมวลผล: %lld\n", final_registers.reg_a);
@@ -298,27 +294,6 @@ int main()
     parse_and_execute(user_code);
 
     printf("\n--- สิ้นสุดการทำงานของโปรแกรม ---\n");
-
-    Instruction program[] = {
-        // กำหนดค่าเริ่มต้นให้กับ Memory
-        {"DEF", "0", "100"}, // Memory[0] = 100
-        {"DEF", "1", "20"},  // Memory[1] = 20
-
-        // ทำการคำนวณ 100 + 20
-        {"LOAD", "REG_A", "0"},    // REG_A = Memory[0] (100)
-        {"LOAD", "REG_B", "1"},    // REG_B = Memory[1] (20)
-        {"ADD", "REG_A", "REG_B"}, // REG_A = REG_A + REG_B (100 + 20)
-
-        // เก็บผลลัพธ์ลงใน Memory[0] และแสดงผล
-        {"STORE", "REG_A", "0"},     // Memory[0] = REG_A (120)
-        {"PRINT", "ผลลัพธ์", "REG_A"}, // แสดงค่าใน REG_A
-
-        // หยุดการทำงานของโปรแกรม
-        {"HLT", "", ""},
-    };
-
-    int numInstructions = sizeof(program) / sizeof(Instruction);
-    executeInstructions(program, numInstructions);
 
     clearSerialBuffer();
     CloseHandle(hSerial);
