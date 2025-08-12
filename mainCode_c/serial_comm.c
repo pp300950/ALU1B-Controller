@@ -12,6 +12,7 @@
 #define UPLOAD_WAIT_MS 3000
 #define READ_TIMEOUT_MS 1000
 #define MAX_READ_BUFFER 256
+#define NUM_BITS 32
 
 HANDLE hSerial = INVALID_HANDLE_VALUE;
 
@@ -22,33 +23,17 @@ long long REG_B = 0;     // General Purpose Register
 long long MEMORY[10];    // Simple Memory Array
 bool CARRY_FLAG = false; // Carry Flag
 
-// ฟังก์ชันสำหรับแปลงค่าเลขฐานสิบเป็นสตริงฐานสอง
 char *decimalToBinary(long long decimal)
 {
-    if (decimal == 0)
-    {
-        char *binStr = (char *)malloc(2);
-        strcpy(binStr, "0");
-        return binStr;
-    }
-
-    int numBits = 0;
-    long long temp = decimal;
-    if (decimal < 0)
-        temp = -decimal;
-    while (temp > 0)
-    {
-        numBits++;
-        temp >>= 1;
-    }
-
-    char *binaryString = (char *)malloc(numBits + 1);
+    // โค้ดเดิมจะคำนวณจำนวนบิตตามค่าที่ป้อนเข้ามา
+    // โค้ดที่ปรับปรุงจะกำหนดให้เป็น 8 บิตเสมอ
+    char *binaryString = (char *)malloc(NUM_BITS + 1);
     if (!binaryString)
         return NULL;
-    binaryString[numBits] = '\0';
+    binaryString[NUM_BITS] = '\0';
 
-    long long value = (decimal < 0) ? -decimal : decimal;
-    for (int i = numBits - 1; i >= 0; i--)
+    long long value = decimal;
+    for (int i = NUM_BITS - 1; i >= 0; i--)
     {
         binaryString[i] = (value & 1) ? '1' : '0';
         value >>= 1;
@@ -61,12 +46,14 @@ long long binaryToDecimal(const char *binaryString)
 {
     long long decimalValue = 0;
     int length = strlen(binaryString);
-    for (int i = 0; i < length; i++)
+    long long powerOfTwo = 1;
+    for (int i = length - 1; i >= 0; i--)
     {
-        if (binaryString[length - 1 - i] == '1')
+        if (binaryString[i] == '1')
         {
-            decimalValue += pow(2, i);
+            decimalValue += powerOfTwo;
         }
+        powerOfTwo *= 2;
     }
     return decimalValue;
 }
@@ -278,7 +265,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         return false;
     }
 }
-
+// ฟังก์ชันหลักสำหรับจำลองการคำนวณ (ปรับปรุงสำหรับ 8 บิต)
 long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, bool *final_carry)
 {
     int op_mode = 0;
@@ -296,56 +283,35 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
         return 0;
     }
 
+    // *** ปรับปรุง: ใช้ NUM_BITS (8) แทนการคำนวณความยาวแบบ Dynamic ***
     char *num1 = decimalToBinary(dec1);
     char *num2 = decimalToBinary(dec2);
 
     if (!num1 || !num2)
     {
-        if (num1)
-            free(num1);
-        if (num2)
-            free(num2);
+        if (num1) free(num1);
+        if (num2) free(num2);
         printf("[ERROR] Memory allocation failed\n");
         return 0;
     }
 
-    size_t len1 = strlen(num1);
-    size_t len2 = strlen(num2);
-    size_t maxLen = (len1 > len2) ? len1 : len2;
-
-    char *paddedNum1 = padBinaryString(num1, maxLen);
-    char *paddedNum2 = padBinaryString(num2, maxLen);
-
-    free(num1);
-    free(num2);
-
-    if (!paddedNum1 || !paddedNum2)
-    {
-        if (paddedNum1)
-            free(paddedNum1);
-        if (paddedNum2)
-            free(paddedNum2);
-        printf("[ERROR] Memory allocation failed\n");
-        return 0;
-    }
-
-    char *result_bin = (char *)malloc(sizeof(char) * (maxLen + 2));
+    char *result_bin = (char *)malloc(sizeof(char) * (NUM_BITS + 1));
     if (!result_bin)
     {
-        free(paddedNum1);
-        free(paddedNum2);
+        free(num1);
+        free(num2);
         printf("[ERROR] Memory allocation failed\n");
         return 0;
     }
-    result_bin[maxLen + 1] = '\0';
+    result_bin[NUM_BITS] = '\0';
 
     int carry_in = (op_mode == 1) ? 1 : 0;
     int alu_result_sum = 0, alu_carry_sum = 0;
 
-    for (int i = 0; i < (int)maxLen; i++)
+    for (int i = 0; i < NUM_BITS; i++)
     {
-        int bitA = paddedNum1[maxLen - 1 - i] - '0';
-        int bitB = paddedNum2[maxLen - 1 - i] - '0';
+        int bitA = num1[NUM_BITS - 1 - i] - '0';
+        int bitB = num2[NUM_BITS - 1 - i] - '0';
 
         printf("\n[STEP %d] กำลังคำนวณบิต: A=%d, B=%d, Carry-in=%d\n", i + 1, bitA, bitB, carry_in);
 
@@ -361,8 +327,8 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
         if (!sendAndReceiveData(command_add, &alu_result_sum, &alu_carry_sum))
         {
             printf("[ERROR] Failed to perform operation for bit %d\n", i);
-            free(paddedNum1);
-            free(paddedNum2);
+            free(num1);
+            free(num2);
             free(result_bin);
             return 0;
         }
@@ -370,62 +336,39 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
         int sum_with_carry = alu_result_sum ^ carry_in;
         int new_carry = (alu_carry_sum) | (alu_result_sum & carry_in);
 
-        result_bin[maxLen - i] = sum_with_carry + '0';
+        result_bin[NUM_BITS - 1 - i] = sum_with_carry + '0';
         carry_in = new_carry;
 
         printf("[INFO] ALU half-add: halfSum=%d halfCarry=%d -> sum=%d carry=%d\n",
                alu_result_sum, alu_carry_sum, sum_with_carry, new_carry);
     }
 
-    free(paddedNum1);
-    free(paddedNum2);
+    free(num1);
+    free(num2);
 
     *final_carry = (carry_in == 1);
-    result_bin[0] = carry_in + '0';
-
-    long long finalDecimalResult = 0;
-
-    if (op_mode == 1)
-    {
-        if (carry_in == 1)
-        {
-            *isNeg = false;
-            char temp_result[maxLen + 1];
-            strncpy(temp_result, result_bin + 1, maxLen);
-            temp_result[maxLen] = '\0';
-            finalDecimalResult = binaryToDecimal(temp_result);
-        }
-        else
-        {
-            *isNeg = true;
-            char *magnitude = (char *)malloc(sizeof(char) * (maxLen + 1));
-            for (size_t i = 1; i <= maxLen; i++)
-            {
-                magnitude[i - 1] = (result_bin[i] == '0') ? '1' : '0';
-            }
-            magnitude[maxLen] = '\0';
-            int carry = 1;
-            for (int i = (int)maxLen - 1; i >= 0; i--)
-            {
-                int bit = magnitude[i] - '0';
-                int sum = bit ^ carry;
-                carry = bit & carry;
-                magnitude[i] = sum + '0';
-            }
-            finalDecimalResult = binaryToDecimal(magnitude);
-            free(magnitude);
-        }
-    }
-    else
-    {
-        *isNeg = false;
-        char temp_result[maxLen + 1];
-        strncpy(temp_result, result_bin + 1, maxLen);
-        temp_result[maxLen] = '\0';
-        finalDecimalResult = binaryToDecimal(temp_result);
-    }
-
+    
+    long long finalDecimalResult = binaryToDecimal(result_bin);
     free(result_bin);
+
+    // *** ปรับปรุง: ตรรกะการตรวจสอบค่าลบและ Carry Flag ***
+    if (op_mode == 1) // สำหรับการลบ (Subtraction)
+    {
+        if (carry_in == 1) { // ถ้ามี borrow (carry-in เป็น 1) แสดงว่าผลลัพธ์เป็นบวก
+            *isNeg = false;
+        } else { // ถ้าไม่มี borrow แสดงว่าผลลัพธ์เป็นลบ
+            *isNeg = true;
+        }
+    }
+    else // สำหรับการบวก (Addition)
+    {
+        *isNeg = (finalDecimalResult > 127); // ตรวจสอบ Signed 8-bit (MSB=1 คือติดลบ)
+        if (*isNeg) {
+            // Logic สำหรับการแปลง 2's complement เป็นค่าติดลบที่ถูกต้อง
+            finalDecimalResult = (signed char)finalDecimalResult;
+        }
+    }
+    
     return finalDecimalResult;
 }
 
@@ -874,71 +817,22 @@ int main()
            {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
            {"HLT", "", ""}};
            */
-
     Instruction program[] = {
-        // --- การกำหนดค่าเริ่มต้น ---
-        {"DEF", "0", "5"},      // Memory[0] = 5
-        {"DEF", "1", "3"},      // Memory[1] = 3
-        {"DEF", "2", "10"},     // Memory[2] = 10
-        {"LOAD", "REG_A", "0"}, // REG_A = 5
-        {"LOAD", "REG_B", "1"}, // REG_B = 3
+    // กำหนดค่าเริ่มต้นใน Memory
 
-        // --- ทดสอบ ADD ---
-        {"ADD", "REG_A", "REG_B"}, // REG_A = 5 + 3 = 8
+    {"DEF", "0", "9999"},      // MEM[0] = 999
+    {"DEF", "1", "3333"},      // MEM[1] = 333
 
-        // --- ทดสอบ STORE ---
-        {"STORE", "2", "REG_A"}, // Memory[2] = 8
+    // โหลดค่าเข้าสู่ Register
+    {"LOAD", "REG_A", "0"},   // REG_A = 999
+    {"LOAD", "REG_B", "1"},   // REG_B = 333
 
-        // --- ทดสอบ MOV ---
-        {"MOV", "REG_C", "REG_B"}, // REG_C = REG_B (3)
+    // ทำการลบ
+    {"SUB", "REG_A", "REG_B"}, // REG_A = 999 - 333
 
-        // --- ทดสอบ CMP และ JZ ---
-        {"CMP", "REG_A", "REG_C"}, // 8 vs 3 → ไม่เท่ากัน → ZERO_FLAG = 0
-        {"JZ", "EQUAL_LABEL", ""}, // ข้ามไปไม่ได้เพราะไม่เท่ากัน
-
-        // --- ทดสอบ SUB ---
-        {"SUB", "REG_A", "REG_B"}, // 8 - 3 = 5
-
-        // --- ทดสอบ JNC (ไม่มี borrow → CARRY_FLAG = 0) ---
-        {"JNC", "NO_CARRY_LABEL", ""},
-
-        // --- Label เมื่อมี carry (จะไม่โดน jump ในรอบนี้) ---
-        {"", "", "", "EQUAL_LABEL"},
-        {"MOV", "REG_D", "REG_C"}, // แค่ตัวอย่าง (จะไม่ถูก execute ในรอบนี้)
-        {"JMP", "AFTER_TESTS", ""},
-
-        // --- Label สำหรับ JNC ---
-        {"", "", "", "NO_CARRY_LABEL"},
-        {"ADD", "REG_A", "REG_B"}, // 5 + 3 = 8 อีกครั้ง
-
-        // --- ทดสอบ JNZ ---
-        {"CMP", "REG_A", "REG_C"}, // 8 vs 3 → ไม่เท่ากัน → ZERO_FLAG = 0
-        {"JNZ", "CONTINUE_LABEL", ""},
-
-        {"MOV", "REG_D", "REG_A"}, // จะไม่ถูก execute เพราะ ZERO_FLAG != 1
-
-        // --- Label สำหรับ JNZ ---
-        {"", "", "", "CONTINUE_LABEL"},
-        {"SUB", "REG_A", "REG_A"}, // REG_A = 0
-        {"CMP", "REG_A", "REG_A"}, // 0 vs 0 → ZERO_FLAG = 1
-        {"JZ", "ZERO_LABEL", ""},
-
-        // --- ถ้าไม่ zero ---
-        {"MOV", "REG_D", "REG_B"},
-
-        // --- Label ZERO ---
-        {"", "", "", "ZERO_LABEL"},
-        {"MOV", "REG_D", "REG_A"}, // REG_D = 0
-
-        // --- ทดสอบ JMP ตรง ๆ ---
-        {"JMP", "END_LABEL", ""},
-
-        {"", "", "", "AFTER_TESTS"},
-        {"MOV", "REG_D", "REG_C"},
-
-        // --- จุดจบโปรแกรม ---
-        {"", "", "", "END_LABEL"},
-        {"HLT", "", ""}};
+    // สิ้นสุดโปรแกรม
+    {"HLT", "", ""},
+};
 
     int numInstructions = sizeof(program) / sizeof(Instruction);
     executeInstructions(program, numInstructions);
