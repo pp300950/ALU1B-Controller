@@ -4,6 +4,7 @@
         "ALUSim.C": "cpp",
         "string.h": "c",
         "stdlib.h": "c",
-        "windows.h": "c"
+        "windows.h": "c",
+        "serial_comm2.h": "c"
     }
 }

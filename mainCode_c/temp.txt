@@ -1,0 +1,10 @@
+  "if (A == 5) {",
+        "   print(\"IF_BLOCK: A is indeed 5!\", A);",
+        "   A = A * 2;",             // A = 5 * 2 = 10
+        "}",
+        "print(\"A after IF is\", A);",
+        "",
+        "if (A > 20) {",
+        "   print(\"This should NOT print\", A);",
+        "}",
+        "print(\"Program finished.\", A);"

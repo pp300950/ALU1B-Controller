@@ -1,3 +1,4 @@
+#include "serial_comm2.h" // เรียกใช้ Header ที่เราสร้าง
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,17 +13,20 @@
 #define UPLOAD_WAIT_MS 3000
 #define READ_TIMEOUT_MS 1000
 #define MAX_READ_BUFFER 256
-#define NUM_BITS 32
+#define NUM_BITS 8
+
+
+// --- ตัวแปร Global ที่ถูกประกาศใน .h จะถูกกำหนดค่าจริงที่นี่ ---
+long long REG_A = 0;
+long long REG_B = 0;
+long long MEMORY[10];
+bool CARRY_FLAG = false;
+bool ZERO_FLAG = false;
+bool SIGN_FLAG = false;
 
 HANDLE hSerial = INVALID_HANDLE_VALUE;
 
 // --- Global Registers and Memory (Hard-coded) ---
-// เราจะใช้ตัวแปรเหล่านี้จำลองการเป็น Register และหน่วยความจำ
-long long REG_A = 0;     // Accumulator Register
-long long REG_B = 0;     // General Purpose Register
-long long MEMORY[10];    // Simple Memory Array
-bool CARRY_FLAG = false; // Carry Flag
-
 char *decimalToBinary(long long decimal)
 {
     // โค้ดเดิมจะคำนวณจำนวนบิตตามค่าที่ป้อนเข้ามา
@@ -289,10 +293,8 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
 
     if (!num1 || !num2)
     {
-        if (num1)
-            free(num1);
-        if (num2)
-            free(num2);
+        if (num1) free(num1);
+        if (num2) free(num2);
         printf("[ERROR] Memory allocation failed\n");
         return 0;
     }
@@ -349,32 +351,28 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
     free(num2);
 
     *final_carry = (carry_in == 1);
-
+    
     long long finalDecimalResult = binaryToDecimal(result_bin);
     free(result_bin);
 
     // *** ปรับปรุง: ตรรกะการตรวจสอบค่าลบและ Carry Flag ***
     if (op_mode == 1) // สำหรับการลบ (Subtraction)
     {
-        if (carry_in == 1)
-        { // ถ้ามี borrow (carry-in เป็น 1) แสดงว่าผลลัพธ์เป็นบวก
+        if (carry_in == 1) { // ถ้ามี borrow (carry-in เป็น 1) แสดงว่าผลลัพธ์เป็นบวก
             *isNeg = false;
-        }
-        else
-        { // ถ้าไม่มี borrow แสดงว่าผลลัพธ์เป็นลบ
+        } else { // ถ้าไม่มี borrow แสดงว่าผลลัพธ์เป็นลบ
             *isNeg = true;
         }
     }
     else // สำหรับการบวก (Addition)
     {
         *isNeg = (finalDecimalResult > 127); // ตรวจสอบ Signed 8-bit (MSB=1 คือติดลบ)
-        if (*isNeg)
-        {
+        if (*isNeg) {
             // Logic สำหรับการแปลง 2's complement เป็นค่าติดลบที่ถูกต้อง
             finalDecimalResult = (signed char)finalDecimalResult;
         }
     }
-
+    
     return finalDecimalResult;
 }
 
@@ -677,13 +675,6 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             printf("[INFO] ผลลัพธ์ SUB: %s = %lld, CARRY_FLAG = %s, ZERO_FLAG = %s, SIGN_FLAG = %s\n",
                    current.operand1, result, CARRY_FLAG ? "true" : "false", ZERO_FLAG ? "true" : "false", SIGN_FLAG ? "true" : "false");
         }
-        // --- เพิ่มใหม่: เพิ่มการจัดการคำสั่ง PRINT ---
-        else if (strcmp(current.instruction, "PRINT") == 0)
-        {
-            long long valueToPrint = getOperandValue(current.operand2);
-            // operand1 คือข้อความที่ต้องการให้แสดงผล, operand2 คือ register ที่จะแสดงค่า
-            printf("\n>>> [OUTPUT] %s: %lld <<<\n", current.operand1, valueToPrint);
-        }
         else if (strcmp(current.instruction, "CMP") == 0)
         {
             long long op1_val = getOperandValue(current.operand1);
@@ -784,131 +775,6 @@ void executeInstructions(Instruction *instructions, int numInstructions)
         }
     }
 }
-
-// --- เพิ่มใหม่: ส่วนของคอมไพเลอร์ภาษาขั้นสูง ---
-
-// โครงสร้างสำหรับเก็บข้อมูลตัวแปร (Symbol Table)
-typedef struct
-{
-    char name[50];
-    int mem_addr;
-} Variable;
-
-// ฟังก์ชันสำหรับค้นหาตัวแปรใน Symbol Table
-int findVariable(const char *name, Variable *table, int count)
-{
-    for (int i = 0; i < count; i++)
-    {
-        if (strcmp(name, table[i].name) == 0)
-        {
-            return table[i].mem_addr;
-        }
-    }
-    return -1; // ไม่พบ
-}
-
-// ฟังก์ชันหลักของ Compiler: แปลงโค้ดขั้นสูงเป็นชุดคำสั่ง Assembly
-Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLines, int *outNumInstructions)
-{
-    // ประมาณการว่า 1 บรรทัดโค้ดขั้นสูงจะสร้างได้สูงสุด 5 คำสั่ง Assembly
-    Instruction *generatedInstructions = (Instruction *)malloc(sizeof(Instruction) * numLines * 5);
-    if (!generatedInstructions)
-    {
-        printf("[COMPILER ERROR] ไม่สามารถจองหน่วยความจำสำหรับคำสั่งได้\n");
-        return NULL;
-    }
-
-    Variable symbolTable[50]; // รองรับตัวแปรได้ 50 ตัว
-    int variableCount = 0;
-    int nextMemAddr = 0;
-    int instructionCount = 0;
-
-    printf("\n--- เริ่มการแปลภาษา (Compiling) ---\n");
-
-    for (int i = 0; i < numLines; i++)
-    {
-        const char *line = highLevelCode[i];
-        char varName[50];
-        int value;
-
-        // รูปแบบที่ 1: การประกาศตัวแปร int var = value;
-        if (sscanf(line, "int %s = %d;", varName, &value) == 2)
-        {
-            printf("[COMPILER] กำลังประมวลผล: ประกาศตัวแปร '%s' = %d\n", varName, value);
-
-            // ตรวจสอบว่ามีตัวแปรชื่อนี้แล้วหรือยัง
-            if (findVariable(varName, symbolTable, variableCount) != -1)
-            {
-                printf("[COMPILER ERROR] ตัวแปร '%s' ถูกประกาศไปแล้ว\n", varName);
-                free(generatedInstructions);
-                return NULL;
-            }
-
-            // เพิ่มตัวแปรใหม่ลงใน Symbol Table
-            strcpy(symbolTable[variableCount].name, varName);
-            symbolTable[variableCount].mem_addr = nextMemAddr;
-            variableCount++;
-
-            // สร้างคำสั่ง DEF <mem_addr> <value>
-            Instruction inst;
-            strcpy(inst.instruction, "DEF");
-            sprintf(inst.operand1, "%d", nextMemAddr); // แปลง int เป็น string
-            sprintf(inst.operand2, "%d", value);
-            strcpy(inst.label, "");
-            generatedInstructions[instructionCount++] = inst;
-
-            nextMemAddr++;
-            continue;
-        }
-
-        // รูปแบบที่ 2: การสั่งพิมพ์ print(var);
-        if (sscanf(line, "print(%[^)]);", varName) == 1)
-        {
-            printf("[COMPILER] กำลังประมวลผล: พิมพ์ค่าตัวแปร '%s'\n", varName);
-
-            int mem_addr = findVariable(varName, symbolTable, variableCount);
-            if (mem_addr == -1)
-            {
-                printf("[COMPILER ERROR] ไม่พบตัวแปรชื่อ '%s'\n", varName);
-                free(generatedInstructions);
-                return NULL;
-            }
-
-            // 1. สร้างคำสั่ง LOAD REG_A, <mem_addr>
-            Instruction load_inst;
-            strcpy(load_inst.instruction, "LOAD");
-            strcpy(load_inst.operand1, "REG_A");
-            sprintf(load_inst.operand2, "%d", mem_addr);
-            strcpy(load_inst.label, "");
-            generatedInstructions[instructionCount++] = load_inst;
-
-            // 2. สร้างคำสั่ง PRINT "Message", REG_A
-            Instruction print_inst;
-            strcpy(print_inst.instruction, "PRINT");
-            sprintf(print_inst.operand1, "Value of %s", varName); // สร้างข้อความแสดงผล
-            strcpy(print_inst.operand2, "REG_A");
-            strcpy(print_inst.label, "");
-            generatedInstructions[instructionCount++] = print_inst;
-
-            continue;
-        }
-
-        printf("[COMPILER WARNING] ไม่รู้จักรูปแบบคำสั่ง: %s\n", line);
-    }
-
-    // เพิ่มคำสั่ง HLT (Halt) เพื่อจบการทำงาน
-    Instruction hlt_inst;
-    strcpy(hlt_inst.instruction, "HLT");
-    strcpy(hlt_inst.operand1, "");
-    strcpy(hlt_inst.operand2, "");
-    strcpy(hlt_inst.label, "");
-    generatedInstructions[instructionCount++] = hlt_inst;
-
-    printf("--- การแปลภาษาเสร็จสิ้น! สร้างได้ %d คำสั่ง ---\n", instructionCount);
-    *outNumInstructions = instructionCount;
-    return generatedInstructions;
-}
-
 // -----------------------------------------------------------
 // Main
 // -----------------------------------------------------------
@@ -971,4 +837,35 @@ int main()
     }
 
     return 0;
+}
+
+// --- ฟังก์ชันใหม่สำหรับจัดการการตั้งค่าและ Cleanup ---
+
+bool setup_environment(const char* cliPath, const char* board, const char* port, const char* inoPath) {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+
+    if (!executeArduinoCLI(cliPath, board, port, inoPath)) {
+        return false;
+    }
+
+    printf("[INFO] กำลังรอให้บอร์ดพร้อมใช้งานเป็นเวลา %d มิลลิวินาที...\n", UPLOAD_WAIT_MS);
+    Sleep(UPLOAD_WAIT_MS);
+
+    hSerial = openAndSetupSerialPort();
+    if (hSerial == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    printf("\n--- เริ่มต้นการทำงานของโปรแกรมจำลอง Assembly ---\n");
+    return true;
+}
+
+void cleanup_environment() {
+    printf("\n--- สิ้นสุดการทำงานของโปรแกรม ---\n");
+    clearSerialBuffer();
+    if (hSerial != INVALID_HANDLE_VALUE) {
+        CloseHandle(hSerial);
+        printf("[DEBUG] ปิดพอร์ตซีเรียลแล้ว\n");
+    }
 }

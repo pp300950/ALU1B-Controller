@@ -1,328 +1,158 @@
-/*
-    ในไฟล์ serial_comm.h รองรับคำสั่งดังนี้
-
-    ## 📜 คู่มือ Assembly จำลอง (serial_comm.c)
-    - 🛠 ส่วนประกอบหลัก
-    - REG_A, REG_B — Register เก็บค่าชั่วคราว
-    - MEMORY — หน่วยความจำหลัก
-    - CARRY_FLAG — สถานะการบวก/ลบ (true = มี Carry/Borrow)
-
-    - 📋 คำสั่ง Assembly
-
-    - คำสั่งที่รองรับในปัจจุบัน
-    - การจัดการข้อมูล:
-    - DEF: กำหนดค่าตัวเลขให้กับหน่วยความจำ (Memory)
-    - LOAD: โหลดค่าจากหน่วยความจำเข้าสู่รีจิสเตอร์ (Register)
-    - STORE: เก็บค่าจากรีจิสเตอร์ลงในหน่วยความจำ
-    - MOV: ย้ายค่าจากรีจิสเตอร์หนึ่งไปอีกรีจิสเตอร์หนึ่ง หรือย้ายค่าคงที่เข้าสู่รีจิสเตอร์
-
-    - การคำนวณและตรรกะ:
-    - ADD: คำสั่งบวกเลข (ใช้ ALU)
-    - SUB: คำสั่งลบเลข (ใช้ ALU)
-    - CMP: เปรียบเทียบค่าสองค่าและตั้งค่าแฟล็ก (Zero, Sign, Carry)
-
-    - การควบคุมโปรแกรม:
-    - JMP: กระโดดไปยังตำแหน่งที่ระบุ (Label) โดยไม่มีเงื่อนไข
-    - JNC: กระโดดเมื่อไม่มีการทด (Carry Flag เป็น false)
-    - JZ: กระโดดเมื่อผลลัพธ์เป็นศูนย์ (Zero Flag เป็น true)
-    - JNZ: กระโดดเมื่อผลลัพธ์ไม่เป็นศูนย์ (Zero Flag เป็น false)
-    - HLT: หยุดการทำงานของโปรแกรม
-
-    ตัวอย่างการใช้คำสั่ง
-    Instruction program[] = {
-        // กำหนดค่าเริ่มต้นใน Memory
-        {"DEF", "0", "9999"},    // MEM[0] = 999
-        {"DEF", "1", "3333"},    // MEM[1] = 333
-
-        // โหลดค่าเข้าสู่ Register
-        {"LOAD", "REG_A", "0"},  // REG_A = 999
-        {"LOAD", "REG_B", "1"},  // REG_B = 333
-
-        // ทำการลบ
-        {"SUB", "REG_A", "REG_B"}, // REG_A = 999 - 333
-
-        // สิ้นสุดโปรแกรม
-        {"HLT", "", ""},
-    };
-    ---
-
-*/
+#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <math.h>
 
-#include "serial_comm.h"
+#include <locale.h>
+#include "serial_comm2.h" // เรียกใช้ไลบรารีที่เราสร้าง
 
-// สร้างหน่วยความจำสำหรับตัวแปรระดับสูง
-typedef struct
-{
-    char name[32];
-    int value;
-    bool is_defined;
+#define UPLOAD_WAIT_MS 3000
+#define READ_TIMEOUT_MS 1000
+#define MAX_READ_BUFFER 256
+#define NUM_BITS 8
+
+// --- ระบบจัดการตัวแปรและคำสั่งแบบไดนามิก ---
+
+#define COM_PORT "COM3"
+#define BAUD_RATE CBR_9600
+#define MAX_VARS 10         // จำกัดจำนวนตัวแปร (เท่ากับขนาด MEMORY)
+#define MAX_INSTRUCTIONS 100 // จำกัดจำนวนคำสั่งสูงสุด
+
+// ตารางสัญลักษณ์ (Symbol Table) เพื่อจับคู่ชื่อตัวแปรกับตำแหน่งในหน่วยความจำ
+typedef struct {
+    char name[50];
+    int address; // ตำแหน่งใน MEMORY array
 } Variable;
 
-Variable high_level_memory[16];
+Variable var_table[MAX_VARS];
+int var_count = 0;
 
-// ฟังก์ชันสำหรับค้นหาหรือสร้างตัวแปร
-int get_or_create_variable(const char *name)
-{
-    for (int i = 0; i < 16; ++i)
-    {
-        if (high_level_memory[i].is_defined && strcmp(high_level_memory[i].name, name) == 0)
-        {
-            return i;
-        }
-        if (!high_level_memory[i].is_defined)
-        {
-            strcpy(high_level_memory[i].name, name);
-            high_level_memory[i].is_defined = true;
-            return i;
+// Array สำหรับเก็บคำสั่ง Assembly ที่จะสร้างขึ้น
+Instruction generated_program[MAX_INSTRUCTIONS];
+int instruction_count = 0;
+
+// ฟังก์ชันสำหรับค้นหาตัวแปรในตาราง
+Variable* find_variable(const char* name) {
+    for (int i = 0; i < var_count; i++) {
+        if (strcmp(var_table[i].name, name) == 0) {
+            return &var_table[i];
         }
     }
-    return -1;
+    return NULL;
 }
 
-// เพิ่มฟังก์ชันสำหรับแยก Operand ออกจากกัน (ไม่ถูกใช้งานในโค้ดนี้ แต่เก็บไว้เผื่อขยาย)
-void split_operands(const char *expression, char *op1, char *op, char *op2)
-{
-    sscanf(expression, "%s %s %s", op1, op, op2);
+// --- ฟังก์ชัน API ระดับสูง ---
+
+// เทียบเท่ากับ: int var_name = initial_value;
+Variable* declare_variable(const char* name, long long initial_value) {
+    if (var_count >= MAX_VARS) {
+        printf("[COMPILER-ERROR] Too many variables declared.\n");
+        return NULL;
+    }
+    if (find_variable(name) != NULL) {
+        printf("[COMPILER-ERROR] Variable '%s' already declared.\n", name);
+        return NULL;
+    }
+
+    // เพิ่มตัวแปรใหม่เข้าตาราง
+    int address = var_count;
+    strcpy(var_table[var_count].name, name);
+    var_table[var_count].address = address;
+    var_count++;
+    
+    // สร้างคำสั่ง Assembly: DEF <address> <value>
+    Instruction instr;
+    strcpy(instr.instruction, "DEF");
+    sprintf(instr.operand1, "%d", address);
+    sprintf(instr.operand2, "%lld", initial_value);
+    instr.label[0] = '\0';
+    generated_program[instruction_count++] = instr;
+
+    printf("[HIGH-LEVEL] Declared variable '%s' with value %lld at MEMORY[%d]\n", name, initial_value, address);
+    return &var_table[var_count - 1];
 }
 
-// ฟังก์ชันสำหรับแปลงและประมวลผลคำสั่ง
-void parse_and_execute(const char *high_level_code)
-{
-    char code_copy[1024];
-    strcpy(code_copy, high_level_code);
-
-    char *token;
-    char *rest = code_copy;
-
-    // สร้างรายการคำสั่ง Assembly ทั้งหมด
-    Instruction assembly_program[100];
-    int prog_idx = 0;
-
-    token = strtok_r(rest, ";", &rest);
-
-    while (token != NULL)
-    {
-        while (*token == ' ' || *token == '\t' || *token == '\n')
-        {
-            token++;
-        }
-        size_t len = strlen(token);
-        while (len > 0 && (token[len - 1] == ' ' || token[len - 1] == '\t' || token[len - 1] == '\n'))
-        {
-            token[--len] = '\0';
-        }
-
-        printf("\nParsing: '%s'\n", token);
-
-        if (strstr(token, "int") == token)
-        {
-            char var_name[32];
-            int var_value;
-            if (sscanf(token, "int %s = %d", var_name, &var_value) == 2)
-            {
-                int mem_address = get_or_create_variable(var_name);
-                if (mem_address != -1)
-                {
-                    high_level_memory[mem_address].value = var_value;
-                    sprintf(assembly_program[prog_idx].instruction, "DEF");
-                    sprintf(assembly_program[prog_idx].operand1, "%d", mem_address);
-                    sprintf(assembly_program[prog_idx++].operand2, "%d", var_value);
-                }
-            }
-        }
-        else
-        {
-            char var_name[32];
-            char operand1[32], op[4], operand2[32];
-            int assign_idx = strchr(token, '=') - token;
-            if (assign_idx > 0)
-            {
-                char expression[100];
-                strncpy(var_name, token, assign_idx);
-                var_name[assign_idx] = '\0';
-
-                int i = 0;
-                while (var_name[i] == ' ' || var_name[i] == '\t')
-                {
-                    i++;
-                }
-                int j = strlen(var_name) - 1;
-                while (j >= 0 && (var_name[j] == ' ' || var_name[j] == '\t'))
-                {
-                    j--;
-                }
-                var_name[j + 1] = '\0';
-                memmove(var_name, var_name + i, j - i + 2);
-
-                strcpy(expression, token + assign_idx + 1);
-
-                if (sscanf(expression, "%s %s %s", operand1, op, operand2) == 3)
-                {
-                    int mem_addr_ans = get_or_create_variable(var_name);
-
-                    int mem_addr_op1 = get_or_create_variable(operand1); // operand1 คือ "ans"
-
-                    // ตรงนี้คือปัญหา: คุณไม่ได้โหลดค่าจาก 'ans' เข้า REG_A อย่างถูกต้อง
-                    // โค้ดในส่วนนี้จะสร้างคำสั่ง LOAD REG_A 0 (สมมติว่า ans อยู่ที่ mem 0)
-                    // แต่ตัวแปร 'ans' ในโค้ดระดับสูงไม่ได้ถูกกำหนดค่าเริ่มต้นให้ '0'
-                    // ดังนั้น เมื่อรันครั้งแรก อาจจะเกิดข้อผิดพลาดในการโหลดค่า
-                    sprintf(assembly_program[prog_idx].instruction, "LOAD");
-                    sprintf(assembly_program[prog_idx].operand1, "REG_A");
-                    sprintf(assembly_program[prog_idx++].operand2, "%d", mem_addr_op1);
-                    if (atoi(operand2) != 0 || (strlen(operand2) == 1 && operand2[0] == '0'))
-                    {
-                        sprintf(assembly_program[prog_idx].instruction, "MOV");
-                        sprintf(assembly_program[prog_idx].operand1, "REG_B");
-                        sprintf(assembly_program[prog_idx++].operand2, "%s", operand2);
-                    }
-                    else
-                    {
-                        int mem_addr_op2 = get_or_create_variable(operand2);
-                        sprintf(assembly_program[prog_idx].instruction, "LOAD");
-                        sprintf(assembly_program[prog_idx].operand1, "REG_B");
-                        sprintf(assembly_program[prog_idx++].operand2, "%d", mem_addr_op2);
-                    }
-
-                    if (strcmp(op, "+") == 0)
-                    {
-                        sprintf(assembly_program[prog_idx].instruction, "ADD");
-                    }
-                    else if (strcmp(op, "-") == 0)
-                    {
-                        sprintf(assembly_program[prog_idx].instruction, "SUB");
-                    }
-                    sprintf(assembly_program[prog_idx].operand1, "REG_A");
-                    sprintf(assembly_program[prog_idx++].operand2, "REG_B");
-
-                    sprintf(assembly_program[prog_idx].instruction, "STORE");
-                    sprintf(assembly_program[prog_idx].operand1, "REG_A");
-                    sprintf(assembly_program[prog_idx++].operand2, "%d", mem_addr_ans);
-                }
-            }
-        }
-        token = strtok_r(NULL, ";", &rest);
+// เทียบเท่ากับ: dest_var = dest_var + value_or_var;
+void add_to_variable(const char* dest_var_name, const char* operand_str) {
+    Variable* dest_var = find_variable(dest_var_name);
+    if (!dest_var) {
+        printf("[COMPILER-ERROR] Undeclared variable '%s'\n", dest_var_name);
+        return;
     }
 
-    // --- รันและแสดงผลลัพธ์เพียงครั้งเดียว ---
-    printf("\n--- รันโค้ด Assembly ทั้งหมด ---\n");
-    if (prog_idx > 0)
-    {
-        sprintf(assembly_program[prog_idx].instruction, "HLT");
-        prog_idx++;
+    char addr_str[10];
+    sprintf(addr_str, "%d", dest_var->address);
 
-        for (int i = 0; i < prog_idx; i++)
-        {
-            printf("   %s %s %s\n", assembly_program[i].instruction, assembly_program[i].operand1, assembly_program[i].operand2);
-        }
+    // 1. โหลดค่าปัจจุบันของตัวแปรปลายทางเข้า REG_A
+    strcpy(generated_program[instruction_count].instruction, "LOAD");
+    strcpy(generated_program[instruction_count].operand1, "REG_A");
+    strcpy(generated_program[instruction_count].operand2, addr_str);
+    instruction_count++;
 
-        // รันและแสดงผลลัพธ์
-        AluRegisters final_registers = executeInstructions(assembly_program, prog_idx);
+    // 2. ทำการบวก
+    strcpy(generated_program[instruction_count].instruction, "ADD");
+    strcpy(generated_program[instruction_count].operand1, "REG_A");
+    strcpy(generated_program[instruction_count].operand2, operand_str); // operand อาจเป็นตัวเลข "1" หรือ "REG_B"
+    instruction_count++;
+    
+    // 3. เก็บผลลัพธ์กลับไปยังหน่วยความจำ
+    strcpy(generated_program[instruction_count].instruction, "STORE");
+    strcpy(generated_program[instruction_count].operand1, "REG_A");
+    strcpy(generated_program[instruction_count].operand2, addr_str);
+    instruction_count++;
 
-        // อัปเดตค่าใน high_level_memory ด้วยผลลัพธ์ที่ถูกต้องจาก REG_A
-        // โดย MEM[0] เป็นที่อยู่ของตัวแปร 'ans'
-        high_level_memory[0].value = final_registers.reg_a;
-
-        // แก้ไขส่วนนี้: แสดงผลค่าจาก REG_A และ REG_B โดยตรง
-        printf("\n--- ผลลัพธ์สุดท้ายจาก ALU ---\n");
-        printf("[INFO] ค่าใน REG_A หลังจากประมวลผล: %lld\n", final_registers.reg_a);
-        printf("[INFO] ค่าใน REG_B หลังจากประมวลผล: %lld\n", final_registers.reg_b);
-        printf("--- สิ้นสุดการแสดงผล ---\n");
-    }
-    printf("\n--- สิ้นสุดการรันโค้ด Assembly ---\n");
-
-    printf("\n--- ข้อมูลตัวแปรที่ถูกตั้งค่าใน Interpreter (อัปเดตจากบอร์ด Arduino) ---\n");
-    // อัปเดตค่าใน high_level_memory จากบอร์ด Arduino
-    for (int i = 0; i < 16; i++)
-    {
-        if (high_level_memory[i].is_defined)
-        {
-            // โค้ดเดิมที่พยายามโหลดค่ากลับมา แต่ตอนนี้ไม่จำเป็นแล้ว
-            // เพราะเราสามารถแสดงผลจาก REG_A และ REG_B ได้โดยตรง
-            // ดังนั้นผมจึงคอมเมนต์ส่วนนี้ไว้เพื่อแสดงให้เห็นว่าไม่จำเป็นต้องมีอีก
-            /*
-            Instruction load_prog[] = {
-                {"LOAD", "REG_A", ""},
-                {"HLT", "", ""}};
-            sprintf(load_prog[0].operand2, "%d", i);
-
-            AluRegisters result_from_load = executeInstructions(load_prog, 2);
-            high_level_memory[i].value = result_from_load.reg_a;
-            */
-
-            // แก้ไขส่วนนี้: แสดงผลลัพธ์จาก high_level_memory ที่อัปเดตจาก STORE คำสั่งสุดท้าย
-            printf("[INFO] MEM[%d] (%s) = %d\n", i, high_level_memory[i].name, high_level_memory[i].value);
-        }
-    }
-    printf("--- สิ้นสุดการแสดงผลข้อมูล ---\n");
+    printf("[HIGH-LEVEL] Generated ADD operation for '%s'\n", dest_var_name);
 }
 
-int main()
-{
-    SetConsoleOutputCP(CP_UTF8);
+// ฟังก์ชันสำหรับพิมพ์ค่าของตัวแปรหลังโปรแกรมทำงานเสร็จ
+void print_variable_value(const char* message, const char* var_name) {
+    Variable* var = find_variable(var_name);
+    if(var) {
+        printf("\n[OUTPUT] %s%lld\n", message, MEMORY[var->address]);
+    } else {
+        printf("\n[OUTPUT] Error: Could not find variable '%s' to print.\n", var_name);
+    }
+}
 
+
+int main() {
+    // --- ตั้งค่า Environment ของ Arduino (เหมือนเดิม) ---
     const char *arduinoCliPath = "C:\\Users\\Administrator\\Desktop\\arduino-cli.exe";
     const char *boardType = "arduino:avr:uno";
     const char *inoFilePath = "C:\\Users\\Administrator\\Desktop\\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino";
-    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
-    if (!executeArduinoCLI(arduinoCliPath, boardType, COM_PORT, inoFilePath))
-    {
+    if (!setup_environment(arduinoCliPath, boardType, COM_PORT, inoFilePath)) {
         return 1;
     }
 
-    printf("[INFO] กำลังรอให้บอร์ดพร้อมใช้งานเป็นเวลา %d มิลลิวินาที...\n", UPLOAD_WAIT_MS);
-    Sleep(UPLOAD_WAIT_MS);
+    // --- ส่วนของการเขียนโค้ดระดับสูง ---
+    printf("--- Generating Assembly from High-Level Code ---\n");
+    
+    // เทียบเท่า: int Num = 5;
+    declare_variable("Num", 5);
 
-    hSerial = openAndSetupSerialPort();
-    if (hSerial == INVALID_HANDLE_VALUE)
-    {
-        return 1;
-    }
+    // เทียบเท่า: Num = Num + 1;
+    add_to_variable("Num", "1"); // operand2 คือค่าที่ต้องการบวก
 
-    printf("\n--- เริ่มต้นการทำงานของโปรแกรม Interpreter ---\n");
+    // (ตัวอย่างเพิ่มเติม)
+    // เทียบเท่า: int AnotherNum = 10;
+    // declare_variable("AnotherNum", 10);
+    // เทียบเท่า: Num = Num + AnotherNum; (ยังไม่รองรับ ต้องใช้ REG_B ช่วย)
+    
+    // --- จบโปรแกรมและรัน ---
+    strcpy(generated_program[instruction_count++].instruction, "HLT"); // เพิ่มคำสั่ง HLT
 
-    for (int i = 0; i < 16; ++i)
-    {
-        high_level_memory[i].is_defined = false;
-    }
+    // รันโปรแกรมที่สร้างขึ้นทั้งหมด
+    executeInstructions(generated_program, instruction_count);
 
-    const char *user_code =
-        "int ans = 100;"
-        "int b = 20;"
-        "ans = ans + b;";
+    // --- แสดงผลลัพธ์ ---
+    // เทียบเท่า: print("ผลลัพธ์คือ: ", Num)
+    print_variable_value("ผลลัพธ์คือ: ", "Num");
 
-    parse_and_execute(user_code);
-
-    printf("\n--- สิ้นสุดการทำงานของโปรแกรม ---\n");
-
-    Instruction program[] = {
-        // กำหนดค่าเริ่มต้นให้กับ Memory
-        {"DEF", "0", "100"}, // Memory[0] = 100
-        {"DEF", "1", "20"},  // Memory[1] = 20
-
-        // ทำการคำนวณ 100 + 20
-        {"LOAD", "REG_A", "0"},    // REG_A = Memory[0] (100)
-        {"LOAD", "REG_B", "1"},    // REG_B = Memory[1] (20)
-        {"ADD", "REG_A", "REG_B"}, // REG_A = REG_A + REG_B (100 + 20)
-
-        // เก็บผลลัพธ์ลงใน Memory[0] และแสดงผล
-        {"STORE", "REG_A", "0"},     // Memory[0] = REG_A (120)
-        {"PRINT", "ผลลัพธ์", "REG_A"}, // แสดงค่าใน REG_A
-
-        // หยุดการทำงานของโปรแกรม
-        {"HLT", "", ""},
-    };
-
-    int numInstructions = sizeof(program) / sizeof(Instruction);
-    executeInstructions(program, numInstructions);
-
-    clearSerialBuffer();
-    CloseHandle(hSerial);
-    printf("[DEBUG] ปิดพอร์ตซีเรียลแล้ว เย่ๆ\n");
+    // คืนค่าทรัพยากร
+    cleanup_environment();
 
     return 0;
 }
