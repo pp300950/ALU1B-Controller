@@ -5,13 +5,12 @@
 #include <stdbool.h>
 #include <math.h>
 #include <ctype.h>
-#include <stdint.h>  // ✅ ต้องมีเพื่อใช้ int32_t, uint32_t
 #include <locale.h>
 
 #define COM_PORT "COM3"
 #define BAUD_RATE CBR_9600
 #define UPLOAD_WAIT_MS 3000
-#define READ_TIMEOUT_MS 2000
+#define READ_TIMEOUT_MS 1000
 #define MAX_READ_BUFFER 256
 #define NUM_BITS 32
 #define MAX_MEMORY 50
@@ -90,7 +89,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
     printf("[SERIAL TX] -> %s", dataToSend);
 
     // Wait for response from Arduino
-    Sleep(20);
+    Sleep(5);
 
     // Read response from serial port
     if (ReadFile(hSerial, readBuffer, MAX_READ_BUFFER - 1, &bytesRead, NULL) && bytesRead > 0)
@@ -136,86 +135,46 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
  * @param final_carry Pointer to store the final carry out of the operation.
  * @return The final calculated result as a long long.
  */
-/**
- * @brief Performs a bitwise hardware operation using the Arduino ALU.
- * This function iterates through each bit of the operands, sends them to the Arduino,
- * and reconstructs the final result.
- */
-
-// 🔧 แก้ไขฟังก์ชัน executeAluOperation
 long long executeAluOperation(long long op1, long long op2, const char *muxCode, int subAddFlag, bool *final_carry)
 {
     long long result = 0;
-    // Carry-in สำหรับ Subtraction คือ 1, สำหรับ Addition คือ 0
-    int carry_in = (subAddFlag == 1) ? 1 : 0;
-
-    // 🐛 DEBUG: แสดงค่า input
-    printf("      [DEBUG] ALU Input: op1=%lld, op2=%lld, mux=%s, sub=%d\n",
-           op1, op2, muxCode, subAddFlag);
+    int carry_in = (subAddFlag == 1) ? 1 : 0; // For subtraction, initial carry-in is 1
 
     for (int i = 0; i < NUM_BITS; i++)
     {
         int bitA = (op1 >> i) & 1;
         int bitB = (op2 >> i) & 1;
 
-        // **แก้ไขที่นี่:** หากเป็น SUB operation, ให้ Invert bitB
-        // แต่ในโค้ด Arduino เราจะ Invert bInput เลยแทน
-        // ดังนั้น ที่นี่เราจะส่ง bitB จริงๆ ไป และให้ Arduino จัดการ Invert
-        // แต่เพื่อให้การดีบักง่ายขึ้น และตรงกับหลักการ Subtraction
-        // เราควรจะ Invert bitB ที่นี่ด้วย ถ้า Arduino ไม่ได้จัดการให้
-        // **ถ้า Arduino แก้ไขแล้ว:** ไม่ต้อง Invert bitB ตรงนี้แล้ว
-        // int effective_bitB = bitB;
-        // if (subAddFlag == 1) {
-        //     effective_bitB = bitB ^ 1; // Invert B for subtraction
-        // }
-        // **ดังนั้น เราจะส่ง bitA, bitB และ carry_in จริงๆ และคาดหวังว่า Arduino จะทำงานถูกต้อง**
+        // For NOT operation (mux 111), the Arduino sketch uses input A for the value to be inverted.
+        if (strcmp(muxCode, "111") == 0)
+        {
+            bitA = bitB; // Move B into A's slot for the hardware
+        }
 
         char command[32];
-        // ส่ง bitA, bitB จริงๆ และ carry_in (ซึ่งเป็น 1 สำหรับ SUB ในบิตแรก)
-        snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
+        snprintf(command, sizeof(command), "%s %d %d %d\n", muxCode, subAddFlag, bitA, bitB);
 
-        int alu_result_bit = 0, alu_carry_out = 0;
-        if (!sendAndReceiveData(command, &alu_result_bit, &alu_carry_out))
+        int alu_result_sum = 0, alu_carry_sum = 0;
+        if (!sendAndReceiveData(command, &alu_result_sum, &alu_carry_sum))
         {
             printf("[FATAL] Hardware communication failed at bit %d. Aborting operation.\n", i);
-            return 0; // Indicate error
+            return 0; // Return 0 on failure
         }
 
-        // 🐛 DEBUG: แสดงผลทุก bit (เฉพาะ 8 bits แรก)
-        if (i < 8) {
-            // แสดงค่า bitA, bitB ที่ส่งไป และ carry_in
-            printf("      [DEBUG] Bit %d: A=%d, B=%d, Cin=%d -> Result=%d, Cout=%d\n",
-                   i, bitA, bitB, carry_in, alu_result_bit, alu_carry_out);
-        }
+        // Full adder logic implemented in software using two half-adder results from hardware
+        int final_sum_bit = alu_result_sum ^ carry_in;
+        int carry_out = alu_carry_sum | (alu_result_sum & carry_in);
 
-        if (alu_result_bit)
+        // Set the corresponding bit in the result
+        if (final_sum_bit)
         {
             result |= (1LL << i);
         }
-        carry_in = alu_carry_out; // Carry out ของบิตนี้จะเป็น Carry in ของบิตถัดไป
+
+        carry_in = carry_out;
     }
 
-    // **แก้ไขการตีความผลลัพธ์ให้ถูกต้องสำหรับ 32-bit:**
-    // ALU ของ Arduino อาจจะทำงานเป็น 32-bit
-    // หากผลลัพธ์มีค่าเป็นลบตามหลัก 32-bit signed integer
-    // ให้ทำการ Sign Extension เป็น 64-bit
-    if (result & (1LL << 31)) { // ตรวจสอบ sign bit (bit 31)
-        // ถ้า sign bit เป็น 1, หมายถึงเป็นจำนวนลบ
-        // ทำการ Sign Extension: เติม 1 ไปในบิตที่สูงกว่า (32-63)
-        result |= 0xFFFFFFFF00000000LL;
-    } else {
-        // ถ้า sign bit เป็น 0, หมายถึงเป็นจำนวนบวก
-        // ให้แน่ใจว่าบิตที่สูงกว่าเป็น 0
-        result &= 0x00000000FFFFFFFFLL;
-    }
-
-
-    // 🐛 DEBUG: แสดงผลลัพธ์สุดท้าย
-    printf("      [DEBUG] ALU Raw Result: 0x%llX = %lld\n", result, result);
-
-    // ตั้งค่า Final Carry Flag จาก Carry Out ของบิตสุดท้าย
     *final_carry = (carry_in == 1);
-
     return result;
 }
 
@@ -473,40 +432,8 @@ void executeInstructions(Instruction *instructions, int numInstructions)
         // --- Control Flow and I/O ---
         else if (strcmp(current.instruction, "PRINT") == 0)
         {
-            // กรณีที่ 1: มีทั้ง operand1 และ operand2 (เหมือนของเดิม)
-            // รูปแบบ: PRINT "ข้อความ", REG_A
-            if (strlen(current.operand2) > 0)
-            {
-                long long valueToPrint = getOperandValue(current.operand2);
-                printf("\n>>> [OUTPUT] %s %lld <<<\n", current.operand1, valueToPrint);
-            }
-            // กรณีที่ 2: มีแค่ operand1
-            // ต้องตรวจสอบว่า operand1 คือ "ข้อความ" หรือ "ชื่อ Register"
-            else if (strlen(current.operand1) > 0)
-            {
-                // ลองพยายามแปลง operand1 เป็นค่าตัวเลข/Register
-                // เราสามารถใช้ getOperandValue มาช่วยตัดสินใจได้
-                // โดยเช็คว่าถ้ามันไม่ใช่ register หรือ memory address และแปลงเป็นตัวเลขแล้วได้ 0,
-                // มีแนวโน้มว่ามันคือข้อความธรรมดา
-                bool isValue = (strcmp(current.operand1, "REG_A") == 0) ||
-                               (strcmp(current.operand1, "REG_B") == 0) ||
-                               (strncmp(current.operand1, "MEM[", 4) == 0) ||
-                               (atoll(current.operand1) != 0 || strcmp(current.operand1, "0") == 0);
-
-                if (isValue)
-                {
-                    // ถ้าเป็น Register หรือตัวเลข -> แสดงค่าของมัน
-                    // รูปแบบ: PRINT REG_A
-                    long long valueToPrint = getOperandValue(current.operand1);
-                    printf("\n>>> [OUTPUT] %lld <<<\n", valueToPrint);
-                }
-                else
-                {
-                    // ถ้าไม่น่าใช่ค่าตัวเลข/Register -> แสดงเป็นข้อความ
-                    // รูปแบบ: PRINT "Just a message"
-                    printf("\n>>> [OUTPUT] %s <<<\n", current.operand1);
-                }
-            }
+            long long valueToPrint = getOperandValue(current.operand2);
+            printf("\n>>> [OUTPUT] %s %lld <<<\n", current.operand1, valueToPrint);
         }
         else if (strcmp(current.instruction, "CMP") == 0)
         {
@@ -734,60 +661,26 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             sprintf(instructions[instructionCount].operand2, "REG_A");
             instructionCount++;
         }
-        // 3. Print: รองรับ print("Message", Var); print("Message"); และ print(Var);
-        else if (strncmp(trimmed_line, "print(", 6) == 0)
+        // 3. Print: print("Message", A);
+        else if (sscanf(trimmed_line, "print(\"%[^\"]\", %[^)]);", message, varName) == 2)
         {
-            // รูปแบบที่ 1: print("Message", Var);
-            if (sscanf(trimmed_line, "print(\"%[^\"]\", %[^)]);", message, varName) == 2)
+            char *clean_var_name = trim(varName);
+            int mem_addr = findVariable(clean_var_name, symbolTable, variableCount);
+            if (mem_addr == -1)
             {
-                char *clean_var_name = trim(varName);
-                int mem_addr = findVariable(clean_var_name, symbolTable, variableCount);
-                if (mem_addr == -1)
-                { /* ... Error Handling ... */
-                    return NULL;
-                }
+                printf("ERROR: Variable '%s' not declared.\n", clean_var_name);
+                free(instructions);
+                return NULL;
+            }
 
-                // สร้างคำสั่ง: LOAD REG_A, [addr] -> PRINT "Message", REG_A
-                sprintf(instructions[instructionCount].instruction, "LOAD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%d", mem_addr);
-                instructionCount++;
-                sprintf(instructions[instructionCount].instruction, "PRINT");
-                sprintf(instructions[instructionCount].operand1, "%s", message);
-                sprintf(instructions[instructionCount].operand2, "REG_A");
-                instructionCount++;
-            }
-            // รูปแบบที่ 2: print("Message");
-            else if (sscanf(trimmed_line, "print(\"%[^\"]\");", message) == 1)
-            {
-                // สร้างคำสั่ง: PRINT "Message"
-                sprintf(instructions[instructionCount].instruction, "PRINT");
-                sprintf(instructions[instructionCount].operand1, "%s", message);
-                // operand2 ปล่อยให้ว่างไปเลย
-                strcpy(instructions[instructionCount].operand2, "");
-                instructionCount++;
-            }
-            // รูปแบบที่ 3: print(Var);
-            else if (sscanf(trimmed_line, "print(%[^)]);", varName) == 1)
-            {
-                char *clean_var_name = trim(varName);
-                int mem_addr = findVariable(clean_var_name, symbolTable, variableCount);
-                if (mem_addr == -1)
-                { /* ... Error Handling ... */
-                    return NULL;
-                }
-
-                // สร้างคำสั่ง: LOAD REG_A, [addr] -> PRINT REG_A
-                sprintf(instructions[instructionCount].instruction, "LOAD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%d", mem_addr);
-                instructionCount++;
-                sprintf(instructions[instructionCount].instruction, "PRINT");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                // operand2 ปล่อยให้ว่าง
-                strcpy(instructions[instructionCount].operand2, "");
-                instructionCount++;
-            }
+            sprintf(instructions[instructionCount].instruction, "LOAD");
+            sprintf(instructions[instructionCount].operand1, "REG_A");
+            sprintf(instructions[instructionCount].operand2, "%d", mem_addr);
+            instructionCount++;
+            sprintf(instructions[instructionCount].instruction, "PRINT");
+            sprintf(instructions[instructionCount].operand1, "%s", message);
+            sprintf(instructions[instructionCount].operand2, "REG_A");
+            instructionCount++;
         }
         // 4. If statement: if (A == 10) {
         else if (sscanf(trimmed_line, "if (%s %s %s)", lhs, op, rhs) == 3)
@@ -890,6 +783,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 jump_fix_stack[++stack_ptr] = instructionCount;
                 instructionCount++;
             }
+
         }
         // 5. Closing brace for if
         else if (strcmp(trimmed_line, "}") == 0)
@@ -1053,22 +947,21 @@ int main()
         "int A = 25;",
         "int B = 12;",
         "int C = 1;",
-        "print(\"Initial A is\", A);",
+      /*  "print(\"Initial A is\", A);",
         "print(\"Initial B is\", B);",
-        "C = A  B;",
+        "C = A - B;", // C = 25 - 12 = 13
         "print(\"C after A-B is\", C);",
-        "",
-        /* "if (C == 13) {",
-         "   print(\"IF_BLOCK: C is 13!\", C);",
-         "   C = C * 2;", // C = 13 * 2 = 26 (Simulated on PC)
-         "}",*/
+        "",*/
+        "if (C == 13) {",
+        "   print(\"IF_BLOCK: C is 13!\", C);",
+        "   C = C * 2;", // C = 13 * 2 = 26 (Simulated on PC)
+        "}",
         /*"print(\"C after IF is\", C);",
         "",
         "if (C > 100) {",
         "   print(\"This should NOT print\", C);",
         "}",
-        "print(\"Program finished. Final C:\", C);"*/
-    };
+        "print(\"Program finished. Final C:\", C);"*/};
 
     int numHighLevelLines = sizeof(highLevelProgram) / sizeof(const char *);
 
