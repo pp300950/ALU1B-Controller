@@ -5,6 +5,9 @@
         "string.h": "c",
         "stdlib.h": "c",
         "windows.h": "c",
-        "serial_comm2.h": "c"
+        "serial_comm2.h": "c",
+        "stdio.h": "c",
+        "stdint.h": "c",
+        "cpu_globals.h": "c"
     }
 }

@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <ctype.h>
-#include <stdint.h>  // ✅ ต้องมีเพื่อใช้ int32_t, uint32_t
+#include <stdint.h>
 #include <locale.h>
 
 #define COM_PORT "COM3"

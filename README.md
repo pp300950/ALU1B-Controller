@@ -179,3 +179,8 @@ C:\Users\Administrator\Desktop\arduino-cli.exe compile --upload -b arduino:avr:u
 - HLT: หยุดการทำงานของโปรแกรม
 
 ---
+
+
+
+คำสั่งรัน
+gcc fix_Sub.c cpu_logic.c -o fix_Sub
