@@ -488,7 +488,6 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             final_result_for_flags = executeAluOperation(op1_val, negated_op2_val, "001", 0, &CARRY_FLAG);
             printf("       [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
 
-
             // ตั้งค่า ZERO_FLAG และ SIGN_FLAG ตามผลลัพธ์สุดท้ายที่ได้จากการลบ
             ZERO_FLAG = (final_result_for_flags == 0);
             SIGN_FLAG = (final_result_for_flags < 0);
@@ -497,39 +496,53 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             printf("       [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d\n",
                    op1_val, op2_val, final_result_for_flags, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
-        else if (strcmp(current.instruction, "JMP") == 0 || strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JS") == 0 || strcmp(current.instruction, "JNS") == 0 || strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0)
+        /* --- Control Flow Operations --- */
+        // แก้ไข block นี้ทั้งหมด
+        else if (strcmp(current.instruction, "JMP") == 0 || 
+                 strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0 ||
+                 strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0 ||
+                 strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0 ||
+                 strcmp(current.instruction, "JGT") == 0 || strcmp(current.instruction, "JLT") == 0 ||
+                 strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0)
         {
+            // ตัดสินใจว่าจะ Jump หรือไม่ จากชื่อคำสั่งและค่า Flags
             bool do_the_jump =
                 (strcmp(current.instruction, "JMP") == 0) ||
-                (strcmp(current.instruction, "JZ") == 0 && ZERO_FLAG) ||   // Jump if Zero (Equal)
-                (strcmp(current.instruction, "JNZ") == 0 && !ZERO_FLAG) || // Jump if Not Zero (Not Equal)
-                (strcmp(current.instruction, "JS") == 0 && SIGN_FLAG) ||   // Jump if Sign (Negative)
-                (strcmp(current.instruction, "JNS") == 0 && !SIGN_FLAG) || // Jump if Not Sign (Positive)
-                (strcmp(current.instruction, "JC") == 0 && CARRY_FLAG) ||  // Jump if Carry (Less than)
-                (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG);  // Jump if No Carry (Greater or Equal)
+                // Unsigned / Basic Jumps
+                ((strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0) && ZERO_FLAG) ||      // Jump if Zero (Equal)
+                ((strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0) && !ZERO_FLAG) || // Jump if Not Zero (Not Equal)
+                (strcmp(current.instruction, "JC") == 0 && CARRY_FLAG) ||  // Jump if Carry (Unsigned Less Than)
+                (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG) || // Jump if No Carry (Unsigned Greater or Equal)
+                
+                // Signed Jumps (ที่เพิ่มเข้ามาใหม่)
+                (strcmp(current.instruction, "JGT") == 0 && !SIGN_FLAG && !ZERO_FLAG) || // Jump if Greater Than (S=0, Z=0)
+                (strcmp(current.instruction, "JLT") == 0 && SIGN_FLAG) ||                 // Jump if Less Than (S=1)
+                (strcmp(current.instruction, "JGE") == 0 && !SIGN_FLAG) ||                // Jump if Greater or Equal (S=0)
+                (strcmp(current.instruction, "JLE") == 0 && (SIGN_FLAG || ZERO_FLAG));   // Jump if Less or Equal (S=1 or Z=1)
 
             if (do_the_jump)
             {
+                // ค้นหา Label ใน Map แล้วเปลี่ยนค่า pc (โค้ดส่วนนี้ดีอยู่แล้ว)
+                bool label_found = false;
                 for (int i = 0; i < labelCount; i++)
                 {
                     if (strcmp(labelMap[i].label, current.operand1) == 0)
                     {
                         pc = labelMap[i].index;
-                        shouldJump = true;
+                        shouldJump = true; // ตั้งค่า Flag ว่าเราจะ Jump
+                        label_found = true;
                         printf("      [INFO] JUMP to '%s' (PC -> %d)\n", current.operand1, pc);
                         break;
                     }
+                }
+                if (!label_found) {
+                     printf("      [ERROR] Label '%s' not found for JUMP!\n", current.operand1);
                 }
             }
             else
             {
                 printf("      [INFO] JUMP condition false. No jump.\n");
             }
-        }
-        else if (strcmp(current.instruction, "HLT") == 0)
-        {
-            printf("      [INFO] HLT. Program terminated.\n");
-            break;
         }
 
         if (!shouldJump)
@@ -550,8 +563,10 @@ typedef struct
     char name[50];
     int mem_addr;
 } Variable;
+
 static int label_id_counter = 0;
 void generate_new_label(char *buffer) { sprintf(buffer, "L%d", label_id_counter++); }
+
 int findVariable(const char *name, Variable *table, int count)
 {
     for (int i = 0; i < count; i++)
@@ -559,6 +574,7 @@ int findVariable(const char *name, Variable *table, int count)
             return table[i].mem_addr;
     return -1;
 }
+
 char *trim(char *str)
 {
     char *end;
@@ -583,6 +599,25 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
 
     int jump_fix_stack[JUMP_STACK_SIZE];
     int stack_ptr = -1;
+
+    // Stacks สำหรับจัดการ nested for-loops
+    int for_loop_start_stack[JUMP_STACK_SIZE];
+    char for_update_statement_stack[JUMP_STACK_SIZE][100];
+    int for_stack_ptr = -1;
+
+    // Stack สำหรับจัดการประเภทของ block ที่กำลังทำงานอยู่ (if/for)
+    enum BlockType
+    {
+        BLOCK_IF,
+        BLOCK_FOR,
+        BLOCK_ELSE
+    };
+    enum BlockType block_type_stack[JUMP_STACK_SIZE];
+    int block_stack_ptr = -1;
+
+    // Stack สำหรับ JMP ข้าม else (เมื่อ if เป็นจริง)
+    int else_jump_fix_stack[JUMP_STACK_SIZE];
+    int else_stack_ptr = -1;
 
     printf("\n--- Compiler: Stage 1 - Parsing and Generating Instructions ---\n");
 
@@ -623,6 +658,126 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 nextMemAddr++;
             }
         }
+       // 4. For loop: for(i = 1; i <= 12; i++)
+        else if (strncmp(trimmed_line, "for(", 4) == 0)
+        {
+            // --- ส่วนของการ Parse (เหมือนเดิม) ---
+            const char *for_content = trimmed_line + 4;
+            const char *semicolon1 = strchr(for_content, ';');
+            const char *semicolon2 = strchr(semicolon1 + 1, ';');
+            const char *paren_end = strchr(semicolon2 + 1, ')');
+
+            // (เพิ่ม Error checking ที่นี่ถ้าต้องการ)
+
+            char init[100], cond[100], update[100];
+            strncpy(init, for_content, semicolon1 - for_content);
+            init[semicolon1 - for_content] = '\0';
+            strncpy(cond, semicolon1 + 1, semicolon2 - (semicolon1 + 1));
+            cond[semicolon2 - (semicolon1 + 1)] = '\0';
+            strncpy(update, semicolon2 + 1, paren_end - (semicolon2 + 1));
+            update[paren_end - (semicolon2 + 1)] = '\0';
+
+            printf("[DEBUG] Init part: '%s'\n", trim(init));
+            printf("[DEBUG] Condition part: '%s'\n", trim(cond));
+            printf("[DEBUG] Update part: '%s'\n", trim(update));
+
+            // --- Part 1: Initialization (เหมือนเดิม) ---
+            char initVar[50], initValStr[50];
+            if (sscanf(trim(init), "%s = %s", initVar, initValStr) == 2)
+            {
+                int dest_addr = findVariable(initVar, symbolTable, variableCount);
+                if (dest_addr != -1)
+                {
+                    sprintf(instructions[instructionCount].instruction, "MOV");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                    sprintf(instructions[instructionCount].operand2, "%s", initValStr);
+                    instructionCount++;
+                    sprintf(instructions[instructionCount].instruction, "STORE");
+                    sprintf(instructions[instructionCount].operand1, "%d", dest_addr);
+                    sprintf(instructions[instructionCount].operand2, "REG_A");
+                    instructionCount++;
+                }
+                else
+                {
+                    printf("ERROR: Variable '%s' not declared.\n", initVar);
+                    return NULL; // Or handle error
+                }
+            }
+
+            // --- Part 2: Condition Check (Start of loop) ---
+            int loop_start_addr = instructionCount;
+            for_loop_start_stack[++for_stack_ptr] = loop_start_addr;
+            strcpy(for_update_statement_stack[for_stack_ptr], trim(update));
+
+            char condVar[50], condOp[10], condVal[50];
+            sscanf(trim(cond), "%s %s %s", condVar, condOp, condVal);
+
+            // โหลดค่ามาเปรียบเทียบ (เหมือนเดิม)
+            int addr1 = findVariable(trim(condVar), symbolTable, variableCount);
+            if (addr1 == -1) { /* Error Handling */ return NULL; }
+            sprintf(instructions[instructionCount].instruction, "LOAD");
+            sprintf(instructions[instructionCount].operand1, "REG_A");
+            sprintf(instructions[instructionCount].operand2, "%d", addr1);
+            instructionCount++;
+
+            int addr2 = findVariable(trim(condVal), symbolTable, variableCount);
+            if (addr2 != -1) {
+                sprintf(instructions[instructionCount].instruction, "LOAD");
+                sprintf(instructions[instructionCount].operand1, "REG_B");
+                sprintf(instructions[instructionCount].operand2, "%d", addr2);
+            } else {
+                sprintf(instructions[instructionCount].instruction, "MOV");
+                sprintf(instructions[instructionCount].operand1, "REG_B");
+                sprintf(instructions[instructionCount].operand2, "%s", trim(condVal));
+            }
+            instructionCount++;
+
+            sprintf(instructions[instructionCount].instruction, "CMP");
+            sprintf(instructions[instructionCount].operand1, "REG_A");
+            sprintf(instructions[instructionCount].operand2, "REG_B");
+            instructionCount++;
+
+
+            // --- Part 3: Generate Conditional Jump to Exit Loop (ส่วนที่แก้ไข) ---
+            char jump_instruction[10];
+            int jump_generated = 1; // Flag เพื่อตรวจสอบว่าเจอ operator ที่รองรับหรือไม่
+
+            // หลักการ: สร้าง Jump instruction ที่เป็น "เงื่อนไขตรงข้าม" เพื่อออกจากลูป
+            // for(...; i <= 12; ...) -> จะออกจากลูปเมื่อ i > 12
+            if (strcmp(condOp, "==") == 0) {
+                strcpy(jump_instruction, "JNE"); // Jump if Not Equal
+            } else if (strcmp(condOp, "!=") == 0) {
+                strcpy(jump_instruction, "JE");  // Jump if Equal
+            } else if (strcmp(condOp, "<") == 0) {
+                strcpy(jump_instruction, "JGE"); // Jump if Greater or Equal
+            } else if (strcmp(condOp, "<=") == 0) {
+                strcpy(jump_instruction, "JGT"); // Jump if Greater Than
+            } else if (strcmp(condOp, ">") == 0) {
+                strcpy(jump_instruction, "JLE"); // Jump if Less or Equal
+            } else if (strcmp(condOp, ">=") == 0) {
+                strcpy(jump_instruction, "JLT"); // Jump if Less Than
+            } else {
+                printf("ERROR: Unsupported operator '%s' in for loop condition.\n", condOp);
+                jump_generated = 0; // ตั้งค่า Flag ว่าไม่สำเร็จ
+            }
+
+            // ถ้าสร้างเงื่อนไข Jump ได้สำเร็จ ให้เพิ่ม instruction นั้นเข้าไป
+            if (jump_generated) {
+                char exit_label[20];
+                generate_new_label(exit_label); // ฟังก์ชันสร้าง Label ที่ไม่ซ้ำกัน
+
+                // สร้างคำสั่ง Jump
+                sprintf(instructions[instructionCount].instruction, "%s", jump_instruction);
+                sprintf(instructions[instructionCount].operand1, "%s", exit_label);
+
+                // เก็บตำแหน่งของ instruction นี้ไว้ใน stack เพื่อรอการแก้ไขที่อยู่ Label ตอนเจอ '}'
+                jump_fix_stack[++stack_ptr] = instructionCount;
+                instructionCount++;
+            }
+
+            block_type_stack[++block_stack_ptr] = BLOCK_FOR;
+        }
+
         // 2. Assignment: A = B + C; or A = 10;
         else if (sscanf(trimmed_line, "%s = %[^\n]", varName, rightHandSide) == 2)
         {
@@ -862,14 +1017,127 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 jump_fix_stack[++stack_ptr] = instructionCount;
                 instructionCount++;
             }
+            block_type_stack[++block_stack_ptr] = BLOCK_IF;
         }
-        // 5. Closing brace for if
+        // 5. Else If statement: } else if (A < 10) {
+        else if (strncmp(trimmed_line, "} else if", 9) == 0)
+        {
+            // Step 1: สร้าง JMP เพื่อข้าม block else นี้ ถ้า if ก่อนหน้าเป็นจริง
+            sprintf(instructions[instructionCount].instruction, "JMP");
+            char end_if_label[20];
+            generate_new_label(end_if_label); // สร้าง Label สำหรับจุดสิ้นสุด
+            sprintf(instructions[instructionCount].operand1, "%s", end_if_label);
+            else_jump_fix_stack[++else_stack_ptr] = instructionCount; // push index ของ JMP นี้ไว้แก้
+            instructionCount++;
+
+            // Step 2: แก้ไข Jump ของ if block ก่อนหน้า ให้ชี้มาที่นี่
+            int prev_if_jump_idx = jump_fix_stack[stack_ptr--];
+            char *else_label = instructions[prev_if_jump_idx].operand1; // ดึง Label ที่จะใช้
+            strcpy(instructions[instructionCount].label, else_label);   // กำหนด Label ให้ instruction *ว่าง* ถัดไป
+            strcpy(instructions[instructionCount].instruction, "");     // สร้าง instruction ว่างๆ ที่มีแต่ label
+            instructionCount++;
+
+            // Step 3: Parse เงื่อนไขของ else if นี้ (เหมือน if ปกติ)
+            sscanf(trimmed_line, "} else if (%s %s %s)", lhs, op, rhs);
+
+            char *clean_lhs = trim(lhs);
+            char *clean_op = trim(op);
+            char *clean_rhs_if = trim(strtok(rhs, ")"));
+
+            jump_fix_stack[++stack_ptr] = instructionCount; // push jump ใหม่
+            instructionCount++;
+
+            block_type_stack[block_stack_ptr] = BLOCK_ELSE; // เปลี่ยน block type เป็น else
+        }
+        // 6. Else statement: } else {
+        else if (strncmp(trimmed_line, "} else", 6) == 0)
+        {
+            // Step 1: สร้าง JMP เพื่อข้าม block else นี้
+            sprintf(instructions[instructionCount].instruction, "JMP");
+            else_jump_fix_stack[++else_stack_ptr] = instructionCount;
+            instructionCount++;
+
+            // Step 2: แก้ไข Jump ของ if/else if block ก่อนหน้า ให้ชี้มาที่นี่
+            int prev_if_jump_idx = jump_fix_stack[stack_ptr--];
+            sprintf(instructions[prev_if_jump_idx].operand1, "%d", instructionCount);
+
+            block_type_stack[block_stack_ptr] = BLOCK_ELSE; // เปลี่ยน block type
+        }
         else if (strcmp(trimmed_line, "}") == 0)
         {
-            if (stack_ptr >= 0)
+            if (block_stack_ptr < 0)
             {
-                int jump_instruction_index = jump_fix_stack[stack_ptr--];
-                char *label_to_set = instructions[jump_instruction_index].operand1;
+                // Error: Unmatched closing brace
+                continue;
+            }
+
+            enum BlockType current_block = block_type_stack[block_stack_ptr--];
+
+            if (current_block == BLOCK_FOR)
+            {
+                // --- Part 1: Handle the update statement ---
+                char update_stmt[100];
+                strcpy(update_stmt, for_update_statement_stack[for_stack_ptr]);
+
+                char varName[50], op[5];
+                if (sscanf(update_stmt, "%[a-zA-Z0-9_]%s", varName, op) == 2)
+                {
+                    int var_addr = findVariable(varName, symbolTable, variableCount);
+                    if (var_addr != -1)
+                    {
+                        // LOAD var
+                        sprintf(instructions[instructionCount].instruction, "LOAD");
+                        sprintf(instructions[instructionCount].operand1, "REG_A");
+                        sprintf(instructions[instructionCount].operand2, "%d", var_addr);
+                        instructionCount++;
+                        // MOV 1 to REG_B
+                        sprintf(instructions[instructionCount].instruction, "MOV");
+                        sprintf(instructions[instructionCount].operand1, "REG_B");
+                        sprintf(instructions[instructionCount].operand2, "1");
+                        instructionCount++;
+                        // ADD or SUB
+                        if (strcmp(op, "++") == 0)
+                            sprintf(instructions[instructionCount].instruction, "ADD");
+                        else if (strcmp(op, "--") == 0)
+                            sprintf(instructions[instructionCount].instruction, "SUB");
+                        sprintf(instructions[instructionCount].operand1, "REG_A");
+                        sprintf(instructions[instructionCount].operand2, "REG_B");
+                        instructionCount++;
+                        // STORE back to var
+                        sprintf(instructions[instructionCount].instruction, "STORE");
+                        sprintf(instructions[instructionCount].operand1, "%d", var_addr);
+                        sprintf(instructions[instructionCount].operand2, "REG_A");
+                        instructionCount++;
+                    }
+                }
+
+                // --- Part 2: Jump back to the start of the loop ---
+                int loop_start = for_loop_start_stack[for_stack_ptr--];
+                sprintf(instructions[instructionCount].instruction, "JMP");
+                sprintf(instructions[instructionCount].operand1, "%d", loop_start);
+                instructionCount++;
+
+                // --- Part 3: Fix the loop exit jump ---
+                int jump_idx = jump_fix_stack[stack_ptr--];
+                char *label_to_set = instructions[jump_idx].operand1;
+                strcpy(instructions[instructionCount].label, label_to_set);
+                strcpy(instructions[instructionCount].instruction, "");
+                instructionCount++;
+            }
+            else if (current_block == BLOCK_IF)
+            {
+                // ปิด if ที่ไม่มี else ตามหลัง
+                int jump_idx = jump_fix_stack[stack_ptr--];
+                char *label_to_set = instructions[jump_idx].operand1;
+                strcpy(instructions[instructionCount].label, label_to_set);
+                strcpy(instructions[instructionCount].instruction, "");
+                instructionCount++;
+            }
+            else if (current_block == BLOCK_ELSE)
+            {
+                // ปิด else หรือ else if, แก้ไข JMP ที่ใช้ข้าม else block
+                int else_jump_idx = else_jump_fix_stack[else_stack_ptr--];
+                char *label_to_set = instructions[else_jump_idx].operand1;
                 strcpy(instructions[instructionCount].label, label_to_set);
                 strcpy(instructions[instructionCount].instruction, "");
                 instructionCount++;
@@ -1022,23 +1290,13 @@ int main()
     printf("\n--- Starting Program Simulation ---\n");
 
     const char *highLevelProgram[] = {
-        "int A = 25;",
-        "int B = 25;",
-        "int C = 100;",
-        /* "if (A == 25) {",
-         "   print(\"เงื่อนไขผ่านนน\");",
-         "}",
-*/
-        /*"print(\"Initial A is\", A);",
-        "print(\"Initial B is\", B);",
-        "C = A - B;",
-        "print(\"A - B =\", C);",
-        "",*/
-        "",
-        "if (C > 100) {",
-        "   print(\"ซีมีค่ามากกว่าร้อยว่ะ \", C);",
+        "print(\"--- Multiplication Table for 5 ---\");",
+        "int i = 1;",
+        "int result = 0;",
+        "for(i = 1; i <= 12; i++) {",
+        "    result = 5 * i;",
+        "    print(result);",
         "}",
-        //"print(\"Program finished. Final C:\", C);",
         "print(\"#### จบการทำงาน ####\");",
     };
 
