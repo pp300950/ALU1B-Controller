@@ -1,5 +1,3 @@
-// พร้อมใช้งานในเวอร์ชั้นนี้ (กำลังพยายามใส่ ภาษาโปรเเกรมขั้นสูง)
-
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -466,18 +464,38 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 }
             }
         }
+        // คำสั่ง CMP ที่ปรับปรุงให้คำนวณ Two's Complement และแสดงผลละเอียด
         else if (strcmp(current.instruction, "CMP") == 0)
         {
             long long op1_val = getOperandValue(current.operand1);
             long long op2_val = getOperandValue(current.operand2);
+            long long final_result_for_flags = 0; // ผลลัพธ์สุดท้ายที่จะใช้ตั้งค่า Flags
 
-            long long result = executeAluOperation(op1_val, op2_val, "001", 1, &CARRY_FLAG);
+            printf("       [INFO] CMP: เริ่มประมวลผล %lld เปรียบเทียบกับ %lld\n", op1_val, op2_val);
 
-            // ตั้งค่า ZERO_FLAG และ SIGN_FLAG ตามผลลัพธ์ที่ได้จาก ALU
-            ZERO_FLAG = (result == 0);
-            SIGN_FLAG = (result < 0);
+            // ขั้นตอนที่ 1: Invert op2_val (~op2_val)
+            bool temp_carry_not = false;
+            long long val2_invert = executeAluOperation(op2_val, 0, "111", 0, &temp_carry_not);
+            printf("       [DEBUG] CMP Step 1 (NOT): ~%lld (op2_val) -> %lld\n", op2_val, val2_invert);
 
-            printf("      [INFO] CMP: %lld vs %lld. ผลลัพธ์จากการลบ=%lld. Flags: Z=%d, S=%d, C=%d\n", op1_val, op2_val, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+            // ขั้นตอนที่ 2: Add 1 to inverted op2_val (Two's Complement)
+            bool temp_carry_plus1 = false;
+            long long negated_op2_val = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_plus1);
+            printf("       [DEBUG] CMP Step 2 (ADD 1): %lld + 1 -> %lld (Two's Complement)\n", val2_invert, negated_op2_val);
+
+            // ขั้นตอนที่ 3: Add op1_val and negated_op2_val
+            // CARRY_FLAG จะถูกตั้งค่าจากการบวกนี้ (ซึ่งในโหมดลบนี้คือ Borrow Out)
+            final_result_for_flags = executeAluOperation(op1_val, negated_op2_val, "001", 0, &CARRY_FLAG);
+            printf("       [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
+
+
+            // ตั้งค่า ZERO_FLAG และ SIGN_FLAG ตามผลลัพธ์สุดท้ายที่ได้จากการลบ
+            ZERO_FLAG = (final_result_for_flags == 0);
+            SIGN_FLAG = (final_result_for_flags < 0);
+
+            // แสดงผลลัพธ์และ Flags สุดท้ายของ CMP
+            printf("       [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d\n",
+                   op1_val, op2_val, final_result_for_flags, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
         else if (strcmp(current.instruction, "JMP") == 0 || strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JS") == 0 || strcmp(current.instruction, "JNS") == 0 || strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0)
         {
@@ -1005,23 +1023,23 @@ int main()
 
     const char *highLevelProgram[] = {
         "int A = 25;",
-        "int B = 12;",
-        "int C = 1;",
-        "print(\"Initial A is\", A);",
+        "int B = 25;",
+        "int C = 100;",
+        /* "if (A == 25) {",
+         "   print(\"เงื่อนไขผ่านนน\");",
+         "}",
+*/
+        /*"print(\"Initial A is\", A);",
         "print(\"Initial B is\", B);",
         "C = A - B;",
         "print(\"A - B =\", C);",
-        "",
-        /* "if (C == 13) {",
-         "   print(\"IF_BLOCK: C is 13!\", C);",
-         "   C = C * 2;", // C = 13 * 2 = 26 (Simulated on PC)
-         "}",*/
-        /*"print(\"C after IF is\", C);",
+        "",*/
         "",
         "if (C > 100) {",
-        "   print(\"This should NOT print\", C);",
+        "   print(\"ซีมีค่ามากกว่าร้อยว่ะ \", C);",
         "}",
-        "print(\"Program finished. Final C:\", C);"*/
+        //"print(\"Program finished. Final C:\", C);",
+        "print(\"#### จบการทำงาน ####\");",
     };
 
     int numHighLevelLines = sizeof(highLevelProgram) / sizeof(const char *);
