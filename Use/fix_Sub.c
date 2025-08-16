@@ -124,21 +124,24 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
     }
 }
 
-#define NUM_BITS 32
 
+#define NUM_BITS 32
 long long executeAluOperation(long long op1, long long op2, const char *muxCode, int subAddFlag, bool *final_carry)
 {
     unsigned long long result_raw = 0;
     int carry_in = (subAddFlag == 1) ? 1 : 0;
 
-    printf("      [DEBUG] ALU(32-bit) Input: op1=%lld, op2=%lld, sub=%d\n", op1, op2, subAddFlag);
+    printf("      [DEBUG] ALU(%d-bit) Input: op1=%lld, op2=%lld, sub=%d\n", NUM_BITS, op1, op2, subAddFlag);
 
+    // วนลูปเพื่อประมวลผลทุกบิตโดยไม่มีเงื่อนไข
     for (int i = 0; i < NUM_BITS; i++)
     {
         int bitA = (op1 >> i) & 1;
         int bitB = (op2 >> i) & 1;
         int alu_result_bit = 0, alu_carry_out = 0;
 
+        // --- ลบ IF/ELSE BLOCK ที่เป็นปัญหาออก ---
+        // ส่งคำสั่งไปยัง ALU สำหรับทุกๆ บิตเสมอ
         char command[32];
         snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
 
@@ -147,7 +150,8 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
             printf("[FATAL] Hardware communication failed at bit %d. Aborting.\n", i);
             return 0; // Error
         }
-
+        
+        // สร้างผลลัพธ์จากบิตที่ได้กลับมา
         if (alu_result_bit)
         {
             result_raw |= (1ULL << i);
@@ -157,13 +161,14 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
     *final_carry = (carry_in == 1);
 
-    printf("      [DEBUG] ALU Raw 32-bit Result: 0x%08llX\n", result_raw);
+    printf("      [DEBUG] ALU Raw %d-bit Result: 0x%08llX\n", NUM_BITS, result_raw);
 
     long long final_result;
 
+    // การจัดการ Sign Extension สำหรับเลขจำนวนเต็มแบบ 32 บิต
     if (result_raw & (1ULL << (NUM_BITS - 1)))
     {
-        final_result = (long long)(result_raw | 0xFFFFFFFF00000000ULL);
+        final_result = (long long)(result_raw | (0xFFFFFFFFULL << NUM_BITS));
     }
     else
     {
@@ -172,7 +177,6 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
     return final_result;
 }
-
 // ===================================================================================
 //
 // SECTION: Assembly Language Simulation
@@ -274,6 +278,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 MEMORY[mem_addr] = val;
             printf("      [INFO] STORE: MEMORY[%d] = %s (Value: %lld)\n", mem_addr, current.operand2, val);
         }
+
         else if (strcmp(current.instruction, "MOV") == 0)
         {
             long long value = getOperandValue(current.operand2);
@@ -291,6 +296,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             SIGN_FLAG = (result < 0);
             printf("      [INFO] HW_ADD: %s = %lld + %lld -> %lld. Flags: Z=%d S=%d C=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
+
         else if (strcmp(current.instruction, "SUB") == 0)
         {
             long long val1 = getOperandValue(current.operand1);
@@ -305,7 +311,6 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             printf("       [DEBUG] Two's Complement of %lld (i.e., -%lld) via ALU: %lld\n", val2, val2, negated_val2);
 
             // long long negated_val2 = val2_invert + 1;
-
             long long result = executeAluOperation(val1, negated_val2, "001", 0, &CARRY_FLAG);
 
             setRegisterValue(current.operand1, result);
@@ -366,8 +371,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
             long long result = 0;
 
-            // วนลูปตามจำนวนบิต (long long คือ 64 บิต)
-            for (int i = 0; i < 64; i++)
+            for (int i = 0; i < 32; i++)
             {
                 // ตรวจสอบบิตที่ i ของตัวคูณ (val2)
                 if ((val2 >> i) & 1)
@@ -469,74 +473,76 @@ void executeInstructions(Instruction *instructions, int numInstructions)
         {
             long long op1_val = getOperandValue(current.operand1);
             long long op2_val = getOperandValue(current.operand2);
-            long long final_result_for_flags = 0; // ผลลัพธ์สุดท้ายที่จะใช้ตั้งค่า Flags
+            bool temp_carry_not = false;
 
             printf("       [INFO] CMP: เริ่มประมวลผล %lld เปรียบเทียบกับ %lld\n", op1_val, op2_val);
 
             // ขั้นตอนที่ 1: Invert op2_val (~op2_val)
-            bool temp_carry_not = false;
             long long val2_invert = executeAluOperation(op2_val, 0, "111", 0, &temp_carry_not);
             printf("       [DEBUG] CMP Step 1 (NOT): ~%lld (op2_val) -> %lld\n", op2_val, val2_invert);
 
             // ขั้นตอนที่ 2: Add 1 to inverted op2_val (Two's Complement)
-            bool temp_carry_plus1 = false;
-            long long negated_op2_val = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_plus1);
+            long long negated_op2_val = executeAluOperation(1, val2_invert, "001", 0, &CARRY_FLAG);
+            //long long negated_op2_val = val2_invert + 1;
             printf("       [DEBUG] CMP Step 2 (ADD 1): %lld + 1 -> %lld (Two's Complement)\n", val2_invert, negated_op2_val);
 
             // ขั้นตอนที่ 3: Add op1_val and negated_op2_val
-            // CARRY_FLAG จะถูกตั้งค่าจากการบวกนี้ (ซึ่งในโหมดลบนี้คือ Borrow Out)
-            final_result_for_flags = executeAluOperation(op1_val, negated_op2_val, "001", 0, &CARRY_FLAG);
+            // CARRY_FLAG จะถูกตั้งค่าจากการบวกนี้
+            bool carry_flag_temp = false;
+            long long final_result_for_flags = executeAluOperation(op1_val, negated_op2_val, "001", 0, &carry_flag_temp);
+            CARRY_FLAG = !carry_flag_temp; // Invert carry for subtract (borrow)
             printf("       [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
 
-            // ตั้งค่า ZERO_FLAG และ SIGN_FLAG ตามผลลัพธ์สุดท้ายที่ได้จากการลบ
+            // ตั้งค่า ZERO_FLAG และ SIGN_FLAG ตามผลลัพธ์สุดท้าย
             ZERO_FLAG = (final_result_for_flags == 0);
-            SIGN_FLAG = (final_result_for_flags < 0);
+
+            // แปลงผลลัพธ์เป็น signed 32-bit ก่อนคำนวณ sign
+            int signed_result = (int)final_result_for_flags;
+            SIGN_FLAG = (signed_result < 0);
 
             // แสดงผลลัพธ์และ Flags สุดท้ายของ CMP
             printf("       [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d\n",
                    op1_val, op2_val, final_result_for_flags, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
-        /* --- Control Flow Operations --- */
-        // แก้ไข block นี้ทั้งหมด
-        else if (strcmp(current.instruction, "JMP") == 0 || 
+        else if (strcmp(current.instruction, "JMP") == 0 ||
                  strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0 ||
                  strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0 ||
                  strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0 ||
                  strcmp(current.instruction, "JGT") == 0 || strcmp(current.instruction, "JLT") == 0 ||
                  strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0)
         {
-            // ตัดสินใจว่าจะ Jump หรือไม่ จากชื่อคำสั่งและค่า Flags
             bool do_the_jump =
                 (strcmp(current.instruction, "JMP") == 0) ||
-                // Unsigned / Basic Jumps
-                ((strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0) && ZERO_FLAG) ||      // Jump if Zero (Equal)
-                ((strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0) && !ZERO_FLAG) || // Jump if Not Zero (Not Equal)
-                (strcmp(current.instruction, "JC") == 0 && CARRY_FLAG) ||  // Jump if Carry (Unsigned Less Than)
-                (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG) || // Jump if No Carry (Unsigned Greater or Equal)
-                
-                // Signed Jumps (ที่เพิ่มเข้ามาใหม่)
-                (strcmp(current.instruction, "JGT") == 0 && !SIGN_FLAG && !ZERO_FLAG) || // Jump if Greater Than (S=0, Z=0)
-                (strcmp(current.instruction, "JLT") == 0 && SIGN_FLAG) ||                 // Jump if Less Than (S=1)
-                (strcmp(current.instruction, "JGE") == 0 && !SIGN_FLAG) ||                // Jump if Greater or Equal (S=0)
-                (strcmp(current.instruction, "JLE") == 0 && (SIGN_FLAG || ZERO_FLAG));   // Jump if Less or Equal (S=1 or Z=1)
+
+                // Unsigned jumps
+                ((strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0) && ZERO_FLAG) ||
+                ((strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0) && !ZERO_FLAG) ||
+                (strcmp(current.instruction, "JC") == 0 && CARRY_FLAG) ||
+                (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG) ||
+
+                // Signed jumps (แก้ใช้ ZERO_FLAG + SIGN_FLAG เท่านั้น)
+                (strcmp(current.instruction, "JGT") == 0 && !ZERO_FLAG && !SIGN_FLAG) || // >  : ไม่ติดลบ และ ไม่เท่ากัน
+                (strcmp(current.instruction, "JLT") == 0 && SIGN_FLAG) ||                // <  : ค่าติดลบ
+                (strcmp(current.instruction, "JGE") == 0 && !SIGN_FLAG) ||               // >= : ไม่ติดลบ
+                (strcmp(current.instruction, "JLE") == 0 && (SIGN_FLAG || ZERO_FLAG));   // <= : ติดลบ หรือ เท่ากัน
 
             if (do_the_jump)
             {
-                // ค้นหา Label ใน Map แล้วเปลี่ยนค่า pc (โค้ดส่วนนี้ดีอยู่แล้ว)
                 bool label_found = false;
                 for (int i = 0; i < labelCount; i++)
                 {
                     if (strcmp(labelMap[i].label, current.operand1) == 0)
                     {
                         pc = labelMap[i].index;
-                        shouldJump = true; // ตั้งค่า Flag ว่าเราจะ Jump
+                        shouldJump = true;
                         label_found = true;
                         printf("      [INFO] JUMP to '%s' (PC -> %d)\n", current.operand1, pc);
                         break;
                     }
                 }
-                if (!label_found) {
-                     printf("      [ERROR] Label '%s' not found for JUMP!\n", current.operand1);
+                if (!label_found)
+                {
+                    printf("      [ERROR] Label '%s' not found for JUMP!\n", current.operand1);
                 }
             }
             else
@@ -658,7 +664,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 nextMemAddr++;
             }
         }
-       // 4. For loop: for(i = 1; i <= 12; i++)
+        // 4. For loop: for(i = 1; i <= 12; i++)
         else if (strncmp(trimmed_line, "for(", 4) == 0)
         {
             // --- ส่วนของการ Parse (เหมือนเดิม) ---
@@ -714,18 +720,24 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
 
             // โหลดค่ามาเปรียบเทียบ (เหมือนเดิม)
             int addr1 = findVariable(trim(condVar), symbolTable, variableCount);
-            if (addr1 == -1) { /* Error Handling */ return NULL; }
+            if (addr1 == -1)
+            { /* Error Handling */
+                return NULL;
+            }
             sprintf(instructions[instructionCount].instruction, "LOAD");
             sprintf(instructions[instructionCount].operand1, "REG_A");
             sprintf(instructions[instructionCount].operand2, "%d", addr1);
             instructionCount++;
 
             int addr2 = findVariable(trim(condVal), symbolTable, variableCount);
-            if (addr2 != -1) {
+            if (addr2 != -1)
+            {
                 sprintf(instructions[instructionCount].instruction, "LOAD");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%d", addr2);
-            } else {
+            }
+            else
+            {
                 sprintf(instructions[instructionCount].instruction, "MOV");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%s", trim(condVal));
@@ -737,32 +749,45 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             sprintf(instructions[instructionCount].operand2, "REG_B");
             instructionCount++;
 
-
             // --- Part 3: Generate Conditional Jump to Exit Loop (ส่วนที่แก้ไข) ---
             char jump_instruction[10];
             int jump_generated = 1; // Flag เพื่อตรวจสอบว่าเจอ operator ที่รองรับหรือไม่
 
             // หลักการ: สร้าง Jump instruction ที่เป็น "เงื่อนไขตรงข้าม" เพื่อออกจากลูป
             // for(...; i <= 12; ...) -> จะออกจากลูปเมื่อ i > 12
-            if (strcmp(condOp, "==") == 0) {
+            if (strcmp(condOp, "==") == 0)
+            {
                 strcpy(jump_instruction, "JNE"); // Jump if Not Equal
-            } else if (strcmp(condOp, "!=") == 0) {
-                strcpy(jump_instruction, "JE");  // Jump if Equal
-            } else if (strcmp(condOp, "<") == 0) {
+            }
+            else if (strcmp(condOp, "!=") == 0)
+            {
+                strcpy(jump_instruction, "JE"); // Jump if Equal
+            }
+            else if (strcmp(condOp, "<") == 0)
+            {
                 strcpy(jump_instruction, "JGE"); // Jump if Greater or Equal
-            } else if (strcmp(condOp, "<=") == 0) {
+            }
+            else if (strcmp(condOp, "<=") == 0)
+            {
                 strcpy(jump_instruction, "JGT"); // Jump if Greater Than
-            } else if (strcmp(condOp, ">") == 0) {
+            }
+            else if (strcmp(condOp, ">") == 0)
+            {
                 strcpy(jump_instruction, "JLE"); // Jump if Less or Equal
-            } else if (strcmp(condOp, ">=") == 0) {
+            }
+            else if (strcmp(condOp, ">=") == 0)
+            {
                 strcpy(jump_instruction, "JLT"); // Jump if Less Than
-            } else {
+            }
+            else
+            {
                 printf("ERROR: Unsupported operator '%s' in for loop condition.\n", condOp);
                 jump_generated = 0; // ตั้งค่า Flag ว่าไม่สำเร็จ
             }
 
             // ถ้าสร้างเงื่อนไข Jump ได้สำเร็จ ให้เพิ่ม instruction นั้นเข้าไป
-            if (jump_generated) {
+            if (jump_generated)
+            {
                 char exit_label[20];
                 generate_new_label(exit_label); // ฟังก์ชันสร้าง Label ที่ไม่ซ้ำกัน
 
@@ -1291,8 +1316,8 @@ int main()
 
     const char *highLevelProgram[] = {
         "print(\"--- Multiplication Table for 5 ---\");",
-        "int i = 1;",
-        "int result = 0;",
+        "int i;",
+        "int result;",
         "for(i = 1; i <= 12; i++) {",
         "    result = 5 * i;",
         "    print(result);",
