@@ -88,10 +88,10 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
         printf("[ERROR] WriteFile failed. Error code: %lu\n", GetLastError());
         return false;
     }
-    printf("[SERIAL TX] -> %s", dataToSend);
+    // printf("[SERIAL TX] -> %s", dataToSend);
 
     // Wait for response from Arduino
-    Sleep(20);
+    Sleep(1);
 
     // Read response from serial port
     if (ReadFile(hSerial, readBuffer, MAX_READ_BUFFER - 1, &bytesRead, NULL) && bytesRead > 0)
@@ -107,7 +107,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
                 break;
         }
 
-        printf("[SERIAL RX] <- %s\n", readBuffer);
+        // printf("[SERIAL RX] <- %s\n", readBuffer);
         if (sscanf(readBuffer, "%d %d", resultOutput, carryOutput) == 2)
         {
             return true;
@@ -522,18 +522,17 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             CARRY_FLAG = !carry_flag_temp; // Invert carry for subtract (borrow)
             printf("      [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
 
-            // ตั้งค่า Flags (Zero, Sign, Overflow)
-            ZERO_FLAG = (final_result_for_flags == 0);
-            SIGN_FLAG = (final_result_for_flags < 0);
-
             // คำนวณ Overflow Flag: OV = (Sign_of_op1 == Sign_of_op2) && (Sign_of_op1 != Sign_of_result)
             // สำหรับการลบ (A-B), B ถูกทำ Two's Complement, ดังนั้นเราต้องดูเครื่องหมายของ A และ -B
             bool sign_op1 = (op1_val >> (NUM_BITS - 1)) & 1;
             bool sign_op2 = (op2_val >> (NUM_BITS - 1)) & 1;
             bool sign_result = (final_result_for_flags >> (NUM_BITS - 1)) & 1;
 
-            // A - B = A + (-B) -> Overflow เกิดขึ้นเมื่อ A และ -B มีเครื่องหมายเหมือนกัน และผลลัพธ์มีเครื่องหมายต่างออกไป
-            OVERFLOW_FLAG = (sign_op1 != sign_op2) && (sign_op1 != sign_result);
+            ZERO_FLAG = (final_result_for_flags == 0);
+            SIGN_FLAG = (final_result_for_flags < 0);
+            CARRY_FLAG = !carry_flag_temp;
+            // overflow = (signA != signB) && (signResult != signA) สำหรับ ADD/SUB
+            OVERFLOW_FLAG = (((op1_val ^ negated_op2_val) & (op1_val ^ final_result_for_flags)) >> (NUM_BITS - 1)) & 1;
 
             // แสดงผลลัพธ์และ Flags สุดท้ายของ CMP
             printf("      [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d, O=%d\n",
@@ -545,6 +544,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                  strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0 ||
                  strcmp(current.instruction, "JGT") == 0 || strcmp(current.instruction, "JLT") == 0 ||
                  strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0)
+
         {
             bool do_the_jump =
                 (strcmp(current.instruction, "JMP") == 0) ||
@@ -556,12 +556,15 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG) ||                                             // CF=0
 
                 // Signed jumps (ใช้ ZERO_FLAG, SIGN_FLAG, OVERFLOW_FLAG ตาม x86)
-                (strcmp(current.instruction, "JG") == 0 && !ZERO_FLAG && (SIGN_FLAG == OVERFLOW_FLAG)) ||   // >  : ZF=0 และ SF=OF
-                (strcmp(current.instruction, "JGE") == 0 && (SIGN_FLAG == OVERFLOW_FLAG)) ||                // >= : SF=OF
-                (strcmp(current.instruction, "JL") == 0 && (SIGN_FLAG != OVERFLOW_FLAG)) ||                 // <  : SF≠OF
-                (strcmp(current.instruction, "JLE") == 0 && (ZERO_FLAG || (SIGN_FLAG != OVERFLOW_FLAG))) || // <= : ZF=1 หรือ SF≠OF
-                (strcmp(current.instruction, "JO") == 0 && OVERFLOW_FLAG) ||                                // Overflow
-                (strcmp(current.instruction, "JNO") == 0 && !OVERFLOW_FLAG);                                // No Overflow
+                // Signed jumps (ใช้ ZERO_FLAG, SIGN_FLAG, OVERFLOW_FLAG)
+                // ...
+                // Signed jumps (simplified for your VM)
+                (strcmp(current.instruction, "JG") == 0 && (REG_A > REG_B)) ||
+                (strcmp(current.instruction, "JGE") == 0 && (REG_A >= REG_B)) ||
+                (strcmp(current.instruction, "JLT") == 0 && (REG_A < REG_B)) ||
+                (strcmp(current.instruction, "JLE") == 0 && (REG_A <= REG_B)) ||
+                (strcmp(current.instruction, "JO") == 0 && OVERFLOW_FLAG) || // Overflow
+                (strcmp(current.instruction, "JNO") == 0 && !OVERFLOW_FLAG); // No Overflow
 
             if (do_the_jump)
             {
@@ -747,15 +750,19 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             }
 
             // --- Part 2: Condition Check (Start of loop) ---
-            
+
             // 💡 --- LOGGING & FIX POINT --- 💡
             printf("\n[COMPILER_LOG] --- Entering FOR block ---\n");
-            
+
             // สร้างและบันทึก Label สำหรับจุดเริ่มต้นของลูป
             char loop_start_label[20];
             generate_new_label(loop_start_label);
+            strcpy(instructions[instructionCount].label, loop_start_label);
+            strcpy(instructions[instructionCount].instruction, ""); // no-op ที่มีแต่ label
+            instructionCount++;
+
             addLabel(loop_start_label, instructionCount);
-            
+
             // เพิ่ม Log เพื่อยืนยันการบันทึก Label
             printf("[COMPILER_LOG] Registered loop START label '%s' at PC address %d\n", loop_start_label, instructionCount);
 
@@ -773,18 +780,24 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             sscanf(trim(cond), "%s %s %s", condVar, condOp, condVal);
 
             int addr1 = findVariable(trim(condVar), symbolTable, variableCount);
-            if (addr1 == -1) { return NULL; }
+            if (addr1 == -1)
+            {
+                return NULL;
+            }
             sprintf(instructions[instructionCount].instruction, "LOAD");
             sprintf(instructions[instructionCount].operand1, "REG_A");
             sprintf(instructions[instructionCount].operand2, "%d", addr1);
             instructionCount++;
 
             int addr2 = findVariable(trim(condVal), symbolTable, variableCount);
-            if (addr2 != -1) {
+            if (addr2 != -1)
+            {
                 sprintf(instructions[instructionCount].instruction, "LOAD");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%d", addr2);
-            } else {
+            }
+            else
+            {
                 sprintf(instructions[instructionCount].instruction, "MOV");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%s", trim(condVal));
@@ -798,14 +811,23 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
 
             // --- Part 3: Generate Conditional Jump to Exit Loop (เหมือนเดิม) ---
             char jump_instruction[10];
+
             int jump_generated = 1;
-            if (strcmp(condOp, "==") == 0) strcpy(jump_instruction, "JNE");
-            else if (strcmp(condOp, "!=") == 0) strcpy(jump_instruction, "JE");
-            else if (strcmp(condOp, "<") == 0) strcpy(jump_instruction, "JGE");
-            else if (strcmp(condOp, "<=") == 0) strcpy(jump_instruction, "JGT");
-            else if (strcmp(condOp, ">") == 0) strcpy(jump_instruction, "JLE");
-            else if (strcmp(condOp, ">=") == 0) strcpy(jump_instruction, "JLT");
-            else {
+            if (strcmp(condOp, "==") == 0)
+                strcpy(jump_instruction, "JNE"); // jump if not equal
+            else if (strcmp(condOp, "!=") == 0)
+                strcpy(jump_instruction, "JE"); // jump if equal
+            else if (strcmp(condOp, "<") == 0)
+                strcpy(jump_instruction, "JGE"); // jump if >=
+            else if (strcmp(condOp, "<=") == 0)
+                strcpy(jump_instruction, "JG"); // jump if greater than
+            else if (strcmp(condOp, ">") == 0)
+                strcpy(jump_instruction, "JLE"); // jump if <=
+            else if (strcmp(condOp, ">=") == 0)
+                strcpy(jump_instruction, "JL"); // jump if <
+
+            else
+            {
                 printf("ERROR: Unsupported operator '%s' in for loop condition.\n", condOp);
                 jump_generated = 0;
             }
@@ -814,105 +836,17 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             {
                 char exit_label[20];
                 generate_new_label(exit_label);
-                
-                // เพิ่ม Log เพื่อดู Label ที่จะใช้กระโดดออก
+
                 printf("[COMPILER_LOG] Generated loop EXIT label '%s' for the conditional jump.\n", exit_label);
 
                 sprintf(instructions[instructionCount].instruction, "%s", jump_instruction);
                 sprintf(instructions[instructionCount].operand1, "%s", exit_label);
 
+                // เก็บตำแหน่ง jump ไว้ใน jump_fix_stack
                 jump_fix_stack[++stack_ptr] = instructionCount;
                 instructionCount++;
             }
-            
-            // ❌❌❌ ลบบรรทัด `block_type_stack[++block_stack_ptr] = BLOCK_FOR;` ที่ซ้ำซ้อนจากตรงนี้ ❌❌❌
         }
-
-        // บล็อกนี้จะทำงานเมื่อ Compiler เจอเครื่องหมาย '}'
-else if (strcmp(trimmed_line, "}") == 0)
-{
-    // ตรวจสอบก่อนว่าเป็น '}' ที่ปิด block ของ for loop จริงๆ
-    if (block_stack_ptr > 0 && block_type_stack[block_stack_ptr] == BLOCK_FOR)
-    {
-        // --- Part 1: สร้าง Assembly Code สำหรับ Update Statement (เช่น i++) ---
-        // ดึงคำสั่ง update ที่เก็บไว้ตอนเจอ for(...) ออกมาจาก stack
-        char update_statement[100];
-        strcpy(update_statement, for_update_statement_stack[for_stack_ptr]);
-
-        // แปลงคำสั่ง "var++" เป็น Assembly
-        char update_var[50];
-        if (sscanf(update_statement, "%[a-zA-Z0-9_]++", update_var) == 1)
-        {
-            int var_addr = findVariable(update_var, symbolTable, variableCount);
-            if (var_addr != -1)
-            {
-                // สร้างโค้ด Assembly สำหรับ i = i + 1
-                // 1. LOAD i -> REG_A
-                sprintf(instructions[instructionCount].instruction, "LOAD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%d", var_addr);
-                instructionCount++;
-
-                // 2. MOV 1 -> REG_B
-                sprintf(instructions[instructionCount].instruction, "MOV");
-                sprintf(instructions[instructionCount].operand1, "REG_B");
-                sprintf(instructions[instructionCount].operand2, "1");
-                instructionCount++;
-
-                // 3. ADD REG_A, REG_B
-                sprintf(instructions[instructionCount].instruction, "ADD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "REG_B");
-                instructionCount++;
-
-                // 4. STORE REG_A -> i
-                sprintf(instructions[instructionCount].instruction, "STORE");
-                sprintf(instructions[instructionCount].operand1, "%d", var_addr);
-                sprintf(instructions[instructionCount].operand2, "REG_A");
-                instructionCount++;
-            }
-        }
-        // (สามารถเพิ่ม logic สำหรับ i--, i=i+N, etc. ได้ที่นี่)
-
-        // --- Part 2: สร้างคำสั่ง JMP เพื่อกลับไปจุดเริ่มต้นของลูป ---
-        // หา Label ของจุดเริ่มต้นลูปที่บันทึกไว้ (เช่น "L0")
-        int loop_start_addr = for_loop_start_stack[for_stack_ptr];
-        char loop_start_label[20] = "";
-        bool found_label = false;
-        for (int k = 0; k < labelCount; k++)
-        {
-            if (labelMap[k].index == loop_start_addr)
-            {
-                strcpy(loop_start_label, labelMap[k].label);
-                found_label = true;
-                break;
-            }
-        }
-        
-        // สร้างคำสั่ง JMP ไปยัง Label นั้น
-        if (found_label)
-        {
-            sprintf(instructions[instructionCount].instruction, "JMP");
-            sprintf(instructions[instructionCount].operand1, "%s", loop_start_label);
-            instructionCount++;
-        }
-        else
-        {
-             printf("[ERROR] Compiler bug: Could not find start label for address %d\n", loop_start_addr);
-        }
-
-        int jump_out_pc = jump_fix_stack[stack_ptr];
-        char *exit_label_name = instructions[jump_out_pc].operand1;
-        
-        // เพิ่ม Label (เช่น "L1") ลงใน Map โดยให้ชี้มาที่ address ปัจจุบัน (instructionCount)
-        addLabel(exit_label_name, instructionCount);
-        
-        
-        stack_ptr--;
-        for_stack_ptr--;
-        block_stack_ptr--;
-    }
-}
 
         // 2. Assignment: A = B + C; or A = 10;
         else if (sscanf(trimmed_line, "%s = %[^\n]", varName, rightHandSide) == 2)
@@ -1199,29 +1133,26 @@ else if (strcmp(trimmed_line, "}") == 0)
 
             block_type_stack[block_stack_ptr] = BLOCK_ELSE; // เปลี่ยน block type
         }
+
         else if (strcmp(trimmed_line, "}") == 0)
         {
             if (block_stack_ptr < 0)
             {
-                // Error: Unmatched closing brace
                 continue;
             }
 
             enum BlockType current_block = block_type_stack[block_stack_ptr--];
 
-            // ภายใน else if (strcmp(trimmed_line, "}") == 0)
-
-            if (block_type_stack[block_stack_ptr] == BLOCK_FOR)
+            if (current_block == BLOCK_FOR)
             {
-                // --- Part 1: สร้าง Code สำหรับ Update Statement (ต้องมีส่วนนี้) ---
-                char update_stmt[100];
-                // ดึงข้อมูล update จาก stack (ยังไม่ pop)
-                strcpy(update_stmt, for_update_statement_stack[for_stack_ptr]);
+                // --- Update i++ ---
+                char update_statement[100];
+                strcpy(update_statement, for_update_statement_stack[for_stack_ptr]);
 
-                char updateVar[50];
-                if (sscanf(update_stmt, "%[a-zA-Z0-9_]++", updateVar) == 1)
+                char update_var[50];
+                if (sscanf(update_statement, "%[a-zA-Z0-9_]++", update_var) == 1)
                 {
-                    int var_addr = findVariable(updateVar, symbolTable, variableCount);
+                    int var_addr = findVariable(update_var, symbolTable, variableCount);
                     if (var_addr != -1)
                     {
                         // LOAD i -> REG_A
@@ -1229,11 +1160,19 @@ else if (strcmp(trimmed_line, "}") == 0)
                         sprintf(instructions[instructionCount].operand1, "REG_A");
                         sprintf(instructions[instructionCount].operand2, "%d", var_addr);
                         instructionCount++;
-                        // ADD REG_A, 1
-                        sprintf(instructions[instructionCount].instruction, "ADD");
-                        sprintf(instructions[instructionCount].operand1, "REG_A");
+
+                        // MOV 1 -> REG_B
+                        sprintf(instructions[instructionCount].instruction, "MOV");
+                        sprintf(instructions[instructionCount].operand1, "REG_B");
                         sprintf(instructions[instructionCount].operand2, "1");
                         instructionCount++;
+
+                        // ADD REG_A, REG_B
+                        sprintf(instructions[instructionCount].instruction, "ADD");
+                        sprintf(instructions[instructionCount].operand1, "REG_A");
+                        sprintf(instructions[instructionCount].operand2, "REG_B");
+                        instructionCount++;
+
                         // STORE REG_A -> i
                         sprintf(instructions[instructionCount].instruction, "STORE");
                         sprintf(instructions[instructionCount].operand1, "%d", var_addr);
@@ -1242,44 +1181,35 @@ else if (strcmp(trimmed_line, "}") == 0)
                     }
                 }
 
-                // --- Part 2: สร้าง JMP กลับไปต้นลูป (FIXED) ---
-                int loop_start_addr = for_loop_start_stack[for_stack_ptr]; // ดึงข้อมูล (ยังไม่ pop)
+                // --- JMP back to loop start ---
+                int loop_start_addr = for_loop_start_stack[for_stack_ptr];
                 char loop_start_label[20] = "";
-                bool found_label = false;
                 for (int k = 0; k < labelCount; k++)
                 {
                     if (labelMap[k].index == loop_start_addr)
                     {
                         strcpy(loop_start_label, labelMap[k].label);
-                        found_label = true;
                         break;
                     }
                 }
 
-                if (found_label)
-                {
-                    sprintf(instructions[instructionCount].instruction, "JMP");
-                    sprintf(instructions[instructionCount].operand1, "%s", loop_start_label);
-                    instructionCount++;
-                }
-                else
-                {
-                    printf("[ERROR] Compiler bug: Could not find start label for address %d\n", loop_start_addr);
-                }
+                sprintf(instructions[instructionCount].instruction, "JMP");
+                sprintf(instructions[instructionCount].operand1, "%s", loop_start_label);
+                instructionCount++;
 
-                // --- Part 3: แก้ไข Jump ขาออก (FIXED & IMPROVED) ---
-                int jump_out_pc = jump_fix_stack[stack_ptr];
-                char *exit_label = instructions[jump_out_pc].operand1; // ดึงชื่อ Label ที่สร้างรอไว้
-                addLabel(exit_label, instructionCount);                // กำหนดให้ Label นั้นชี้มาที่ตำแหน่งปัจจุบัน
+                // --- Place EXIT label *here* (after loop ends) ---
+                int jump_out_pc = jump_fix_stack[stack_ptr--];
+                char *exit_label_name = instructions[jump_out_pc].operand1;
 
-                // --- Part 4: Pop Stacks ทั้งหมดตอนท้าย (FIXED) ---
-                stack_ptr--;
+                addLabel(exit_label_name, instructionCount);
+                strcpy(instructions[instructionCount].label, exit_label_name);
+                strcpy(instructions[instructionCount].instruction, "");
+                instructionCount++;
+
                 for_stack_ptr--;
-                block_stack_ptr--; // pop block_stack_ptr ออกจาก if นี้ด้วย
             }
             else if (current_block == BLOCK_IF)
             {
-                // ปิด if ที่ไม่มี else ตามหลัง
                 int jump_idx = jump_fix_stack[stack_ptr--];
                 char *label_to_set = instructions[jump_idx].operand1;
                 strcpy(instructions[instructionCount].label, label_to_set);
@@ -1288,7 +1218,6 @@ else if (strcmp(trimmed_line, "}") == 0)
             }
             else if (current_block == BLOCK_ELSE)
             {
-                // ปิด else หรือ else if, แก้ไข JMP ที่ใช้ข้าม else block
                 int else_jump_idx = else_jump_fix_stack[else_stack_ptr--];
                 char *label_to_set = instructions[else_jump_idx].operand1;
                 strcpy(instructions[instructionCount].label, label_to_set);
@@ -1446,7 +1375,7 @@ int main()
         "print(\"--- Multiplication Table for 5 ---\");",
         "int i;",
         "int result;",
-        "for(i = 1; i <= 12; i++) {",
+        "for(i = 1; i <= 3; i++) {",
         "    result = 5 * i;",
         "    print(result);",
         "}",

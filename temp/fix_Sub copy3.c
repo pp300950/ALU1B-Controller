@@ -747,15 +747,15 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             }
 
             // --- Part 2: Condition Check (Start of loop) ---
-            
+
             // 💡 --- LOGGING & FIX POINT --- 💡
             printf("\n[COMPILER_LOG] --- Entering FOR block ---\n");
-            
+
             // สร้างและบันทึก Label สำหรับจุดเริ่มต้นของลูป
             char loop_start_label[20];
             generate_new_label(loop_start_label);
             addLabel(loop_start_label, instructionCount);
-            
+
             // เพิ่ม Log เพื่อยืนยันการบันทึก Label
             printf("[COMPILER_LOG] Registered loop START label '%s' at PC address %d\n", loop_start_label, instructionCount);
 
@@ -773,18 +773,24 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             sscanf(trim(cond), "%s %s %s", condVar, condOp, condVal);
 
             int addr1 = findVariable(trim(condVar), symbolTable, variableCount);
-            if (addr1 == -1) { return NULL; }
+            if (addr1 == -1)
+            {
+                return NULL;
+            }
             sprintf(instructions[instructionCount].instruction, "LOAD");
             sprintf(instructions[instructionCount].operand1, "REG_A");
             sprintf(instructions[instructionCount].operand2, "%d", addr1);
             instructionCount++;
 
             int addr2 = findVariable(trim(condVal), symbolTable, variableCount);
-            if (addr2 != -1) {
+            if (addr2 != -1)
+            {
                 sprintf(instructions[instructionCount].instruction, "LOAD");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%d", addr2);
-            } else {
+            }
+            else
+            {
                 sprintf(instructions[instructionCount].instruction, "MOV");
                 sprintf(instructions[instructionCount].operand1, "REG_B");
                 sprintf(instructions[instructionCount].operand2, "%s", trim(condVal));
@@ -799,13 +805,20 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             // --- Part 3: Generate Conditional Jump to Exit Loop (เหมือนเดิม) ---
             char jump_instruction[10];
             int jump_generated = 1;
-            if (strcmp(condOp, "==") == 0) strcpy(jump_instruction, "JNE");
-            else if (strcmp(condOp, "!=") == 0) strcpy(jump_instruction, "JE");
-            else if (strcmp(condOp, "<") == 0) strcpy(jump_instruction, "JGE");
-            else if (strcmp(condOp, "<=") == 0) strcpy(jump_instruction, "JGT");
-            else if (strcmp(condOp, ">") == 0) strcpy(jump_instruction, "JLE");
-            else if (strcmp(condOp, ">=") == 0) strcpy(jump_instruction, "JLT");
-            else {
+            if (strcmp(condOp, "==") == 0)
+                strcpy(jump_instruction, "JNE");
+            else if (strcmp(condOp, "!=") == 0)
+                strcpy(jump_instruction, "JE");
+            else if (strcmp(condOp, "<") == 0)
+                strcpy(jump_instruction, "JGE");
+            else if (strcmp(condOp, "<=") == 0)
+                strcpy(jump_instruction, "JGT");
+            else if (strcmp(condOp, ">") == 0)
+                strcpy(jump_instruction, "JLE");
+            else if (strcmp(condOp, ">=") == 0)
+                strcpy(jump_instruction, "JLT");
+            else
+            {
                 printf("ERROR: Unsupported operator '%s' in for loop condition.\n", condOp);
                 jump_generated = 0;
             }
@@ -814,7 +827,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             {
                 char exit_label[20];
                 generate_new_label(exit_label);
-                
+
                 // เพิ่ม Log เพื่อดู Label ที่จะใช้กระโดดออก
                 printf("[COMPILER_LOG] Generated loop EXIT label '%s' for the conditional jump.\n", exit_label);
 
@@ -824,95 +837,9 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 jump_fix_stack[++stack_ptr] = instructionCount;
                 instructionCount++;
             }
-            
+
             // ❌❌❌ ลบบรรทัด `block_type_stack[++block_stack_ptr] = BLOCK_FOR;` ที่ซ้ำซ้อนจากตรงนี้ ❌❌❌
         }
-
-        // บล็อกนี้จะทำงานเมื่อ Compiler เจอเครื่องหมาย '}'
-else if (strcmp(trimmed_line, "}") == 0)
-{
-    // ตรวจสอบก่อนว่าเป็น '}' ที่ปิด block ของ for loop จริงๆ
-    if (block_stack_ptr > 0 && block_type_stack[block_stack_ptr] == BLOCK_FOR)
-    {
-        // --- Part 1: สร้าง Assembly Code สำหรับ Update Statement (เช่น i++) ---
-        // ดึงคำสั่ง update ที่เก็บไว้ตอนเจอ for(...) ออกมาจาก stack
-        char update_statement[100];
-        strcpy(update_statement, for_update_statement_stack[for_stack_ptr]);
-
-        // แปลงคำสั่ง "var++" เป็น Assembly
-        char update_var[50];
-        if (sscanf(update_statement, "%[a-zA-Z0-9_]++", update_var) == 1)
-        {
-            int var_addr = findVariable(update_var, symbolTable, variableCount);
-            if (var_addr != -1)
-            {
-                // สร้างโค้ด Assembly สำหรับ i = i + 1
-                // 1. LOAD i -> REG_A
-                sprintf(instructions[instructionCount].instruction, "LOAD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%d", var_addr);
-                instructionCount++;
-
-                // 2. MOV 1 -> REG_B
-                sprintf(instructions[instructionCount].instruction, "MOV");
-                sprintf(instructions[instructionCount].operand1, "REG_B");
-                sprintf(instructions[instructionCount].operand2, "1");
-                instructionCount++;
-
-                // 3. ADD REG_A, REG_B
-                sprintf(instructions[instructionCount].instruction, "ADD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "REG_B");
-                instructionCount++;
-
-                // 4. STORE REG_A -> i
-                sprintf(instructions[instructionCount].instruction, "STORE");
-                sprintf(instructions[instructionCount].operand1, "%d", var_addr);
-                sprintf(instructions[instructionCount].operand2, "REG_A");
-                instructionCount++;
-            }
-        }
-        // (สามารถเพิ่ม logic สำหรับ i--, i=i+N, etc. ได้ที่นี่)
-
-        // --- Part 2: สร้างคำสั่ง JMP เพื่อกลับไปจุดเริ่มต้นของลูป ---
-        // หา Label ของจุดเริ่มต้นลูปที่บันทึกไว้ (เช่น "L0")
-        int loop_start_addr = for_loop_start_stack[for_stack_ptr];
-        char loop_start_label[20] = "";
-        bool found_label = false;
-        for (int k = 0; k < labelCount; k++)
-        {
-            if (labelMap[k].index == loop_start_addr)
-            {
-                strcpy(loop_start_label, labelMap[k].label);
-                found_label = true;
-                break;
-            }
-        }
-        
-        // สร้างคำสั่ง JMP ไปยัง Label นั้น
-        if (found_label)
-        {
-            sprintf(instructions[instructionCount].instruction, "JMP");
-            sprintf(instructions[instructionCount].operand1, "%s", loop_start_label);
-            instructionCount++;
-        }
-        else
-        {
-             printf("[ERROR] Compiler bug: Could not find start label for address %d\n", loop_start_addr);
-        }
-
-        int jump_out_pc = jump_fix_stack[stack_ptr];
-        char *exit_label_name = instructions[jump_out_pc].operand1;
-        
-        // เพิ่ม Label (เช่น "L1") ลงใน Map โดยให้ชี้มาที่ address ปัจจุบัน (instructionCount)
-        addLabel(exit_label_name, instructionCount);
-        
-        
-        stack_ptr--;
-        for_stack_ptr--;
-        block_stack_ptr--;
-    }
-}
 
         // 2. Assignment: A = B + C; or A = 10;
         else if (sscanf(trimmed_line, "%s = %[^\n]", varName, rightHandSide) == 2)
@@ -1199,6 +1126,7 @@ else if (strcmp(trimmed_line, "}") == 0)
 
             block_type_stack[block_stack_ptr] = BLOCK_ELSE; // เปลี่ยน block type
         }
+
         else if (strcmp(trimmed_line, "}") == 0)
         {
             if (block_stack_ptr < 0)
