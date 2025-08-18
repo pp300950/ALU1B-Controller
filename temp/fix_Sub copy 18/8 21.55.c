@@ -531,14 +531,8 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             ZERO_FLAG = (final_result_for_flags == 0);
             SIGN_FLAG = (final_result_for_flags < 0);
             CARRY_FLAG = !carry_flag_temp;
-
-            // --- แก้ไขตรรกะการคำนวณ OVERFLOW_FLAG ---
-            // Overflow จะเกิดเมื่อ: (บวก + บวก = ลบ) หรือ (ลบ + ลบ = บวก)
-            bool sign1 = (op1_val < 0);
-            bool sign2 = (negated_op2_val < 0);
-            bool sign_res = (final_result_for_flags < 0);
-            OVERFLOW_FLAG = (sign1 == sign2) && (sign1 != sign_res);
-            // --- จบส่วนที่แก้ไข ---
+            // overflow = (signA != signB) && (signResult != signA) สำหรับ ADD/SUB
+            OVERFLOW_FLAG = (((op1_val ^ negated_op2_val) & (op1_val ^ final_result_for_flags)) >> (NUM_BITS - 1)) & 1;
 
             // แสดงผลลัพธ์และ Flags สุดท้ายของ CMP
             printf("      [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d, O=%d\n",
@@ -548,9 +542,9 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                  strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0 ||
                  strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0 ||
                  strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0 ||
-                 strcmp(current.instruction, "JG") == 0 || strcmp(current.instruction, "JLT") == 0 || // <-- แก้ไขเป็น JG
-                 strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0 ||
-                 strcmp(current.instruction, "JO") == 0 || strcmp(current.instruction, "JNO") == 0) // <-- เพิ่ม JO และ JNO เข้าไปด้วย
+                 strcmp(current.instruction, "JGT") == 0 || strcmp(current.instruction, "JLT") == 0 ||
+                 strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0)
+
         {
             bool do_the_jump =
                 (strcmp(current.instruction, "JMP") == 0) ||
@@ -561,13 +555,16 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 (strcmp(current.instruction, "JC") == 0 && CARRY_FLAG) ||                                               // CF=1
                 (strcmp(current.instruction, "JNC") == 0 && !CARRY_FLAG) ||                                             // CF=0
 
-                // Signed jumps (ใช้ ZERO_FLAG, SIGN_FLAG, OVERFLOW_FLAG ตามหลักการ)
-                (strcmp(current.instruction, "JG") == 0 && !ZERO_FLAG && (SIGN_FLAG == OVERFLOW_FLAG)) ||   // Jump if Greater (A > B)
-                (strcmp(current.instruction, "JGE") == 0 && (SIGN_FLAG == OVERFLOW_FLAG)) ||                // Jump if Greater or Equal (A >= B)
-                (strcmp(current.instruction, "JLT") == 0 && (SIGN_FLAG != OVERFLOW_FLAG)) ||                // Jump if Less (A < B)
-                (strcmp(current.instruction, "JLE") == 0 && (ZERO_FLAG || (SIGN_FLAG != OVERFLOW_FLAG))) || // Jump if Less or Equal (A <= B)
-                (strcmp(current.instruction, "JO") == 0 && OVERFLOW_FLAG) ||                                // Jump on Overflow
-                (strcmp(current.instruction, "JNO") == 0 && !OVERFLOW_FLAG);                                // Jump on No Overflow
+                // Signed jumps (ใช้ ZERO_FLAG, SIGN_FLAG, OVERFLOW_FLAG ตาม x86)
+                // Signed jumps (ใช้ ZERO_FLAG, SIGN_FLAG, OVERFLOW_FLAG)
+                // ...
+                // Signed jumps (simplified for your VM)
+                (strcmp(current.instruction, "JG") == 0 && (REG_A > REG_B)) ||
+                (strcmp(current.instruction, "JGE") == 0 && (REG_A >= REG_B)) ||
+                (strcmp(current.instruction, "JLT") == 0 && (REG_A < REG_B)) ||
+                (strcmp(current.instruction, "JLE") == 0 && (REG_A <= REG_B)) ||
+                (strcmp(current.instruction, "JO") == 0 && OVERFLOW_FLAG) || // Overflow
+                (strcmp(current.instruction, "JNO") == 0 && !OVERFLOW_FLAG); // No Overflow
 
             if (do_the_jump)
             {
