@@ -131,7 +131,7 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
     unsigned long long result_raw = 0;
     int carry_in = (subAddFlag == 1) ? 1 : 0;
 
-    printf("      [DEBUG] ALU(%d-bit) Input: op1=%lld, op2=%lld, sub=%d\n", NUM_BITS, op1, op2, subAddFlag);
+    //printf("      [DEBUG] ALU(%d-bit) Input: op1=%lld, op2=%lld, sub=%d\n", NUM_BITS, op1, op2, subAddFlag);
 
     // วนลูปเพื่อประมวลผลทุกบิตโดยไม่มีเงื่อนไข
     for (int i = 0; i < NUM_BITS; i++)
@@ -161,7 +161,7 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
     *final_carry = (carry_in == 1);
 
-    printf("      [DEBUG] ALU Raw %d-bit Result: 0x%08llX\n", NUM_BITS, result_raw);
+    //printf("      [DEBUG] ALU Raw %d-bit Result: 0x%08llX\n", NUM_BITS, result_raw);
 
     long long final_result;
 
@@ -276,12 +276,16 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             continue;
         }
 
+        /*
+        
         printf("\n[PC:%02d] Executing: %s", pc, current.instruction);
         if (strlen(current.operand1) > 0)
             printf(" %s", current.operand1);
         if (strlen(current.operand2) > 0)
             printf(", %s", current.operand2);
         printf("\n");
+        
+        */
 
         // --- Data and Memory Operations ---
         if (strcmp(current.instruction, "DEF") == 0)
@@ -290,7 +294,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             long long value = atoll(current.operand2);
             if (mem_addr >= 0 && mem_addr < MAX_MEMORY)
                 MEMORY[mem_addr] = value;
-            printf("      [INFO] DEFINE: MEMORY[%d] = %lld\n", mem_addr, value);
+            // printf("      [INFO] DEFINE: MEMORY[%d] = %lld\n", mem_addr, value);
         }
         else if (strcmp(current.instruction, "LOAD") == 0)
         {
@@ -298,7 +302,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             if (mem_addr >= 0 && mem_addr < MAX_MEMORY)
             {
                 setRegisterValue(current.operand1, MEMORY[mem_addr]);
-                printf("      [INFO] LOAD: %s = MEMORY[%d] (Value: %lld)\n", current.operand1, mem_addr, getOperandValue(current.operand1));
+                // printf("      [INFO] LOAD: %s = MEMORY[%d] (Value: %lld)\n", current.operand1, mem_addr, getOperandValue(current.operand1));
             }
         }
         else if (strcmp(current.instruction, "STORE") == 0)
@@ -307,14 +311,14 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             long long val = getOperandValue(current.operand2);
             if (mem_addr >= 0 && mem_addr < MAX_MEMORY)
                 MEMORY[mem_addr] = val;
-            printf("      [INFO] STORE: MEMORY[%d] = %s (Value: %lld)\n", mem_addr, current.operand2, val);
+            // printf("      [INFO] STORE: MEMORY[%d] = %s (Value: %lld)\n", mem_addr, current.operand2, val);
         }
 
         else if (strcmp(current.instruction, "MOV") == 0)
         {
             long long value = getOperandValue(current.operand2);
             setRegisterValue(current.operand1, value);
-            printf("      [INFO] MOV: %s = %lld\n", current.operand1, value);
+            // printf("      [INFO] MOV: %s = %lld\n", current.operand1, value);
         }
 
         else if (strcmp(current.instruction, "ADD") == 0)
@@ -325,7 +329,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, result);
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-            printf("      [INFO] HW_ADD: %s = %lld + %lld -> %lld. Flags: Z=%d S=%d C=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+            // printf("      [INFO] HW_ADD: %s = %lld + %lld -> %lld. Flags: Z=%d S=%d C=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
 
         else if (strcmp(current.instruction, "SUB") == 0)
@@ -335,11 +339,11 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
             bool temp_carry_not = false; // ใช้ตัวแปรชั่วคราวสำหรับ carry flag ของการ NOT
             long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry_not);
-            printf("       [DEBUG] Inverted val2 (~%lld) via ALU: %lld\n", val2, val2_invert);
+            // printf("       [DEBUG] Inverted val2 (~%lld) via ALU: %lld\n", val2, val2_invert);
 
             bool temp_carry_plus1 = false; // ใช้ตัวแปรชั่วคราวสำหรับ carry flag ของการบวก 1
             long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_plus1);
-            printf("       [DEBUG] Two's Complement of %lld (i.e., -%lld) via ALU: %lld\n", val2, val2, negated_val2);
+            // printf("       [DEBUG] Two's Complement of %lld (i.e., -%lld) via ALU: %lld\n", val2, val2, negated_val2);
 
             // long long negated_val2 = val2_invert + 1;
             long long result = executeAluOperation(val1, negated_val2, "001", 0, &CARRY_FLAG);
@@ -349,8 +353,12 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
 
+            /*
+            
             printf("       [INFO] HW_SUB: %s = %lld - %lld -> %lld. Flags: Z=%d S=%d C=%d\n",
                    current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+                   
+                   */
         }
 
         // --- Hardware ALU Logic Operations ---
@@ -362,7 +370,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, result);
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-            printf("      [INFO] HW_AND: %s = %lld & %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
+            // printf("      [INFO] HW_AND: %s = %lld & %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
         }
         else if (strcmp(current.instruction, "OR") == 0)
         {
@@ -372,7 +380,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, result);
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-            printf("      [INFO] HW_OR: %s = %lld | %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
+            // printf("      [INFO] HW_OR: %s = %lld | %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
         }
         else if (strcmp(current.instruction, "XOR") == 0)
         {
@@ -382,7 +390,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, result);
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-            printf("      [INFO] HW_XOR: %s = %lld ^ %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
+            // printf("      [INFO] HW_XOR: %s = %lld ^ %lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG);
         }
         else if (strcmp(current.instruction, "NOT") == 0)
         {
@@ -391,7 +399,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, result);
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-            printf("      [INFO] HW_NOT: %s = ~%lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val, result, ZERO_FLAG, SIGN_FLAG);
+            // printf("      [INFO] HW_NOT: %s = ~%lld -> %lld. Flags: Z=%d S=%d\n", current.operand1, val, result, ZERO_FLAG, SIGN_FLAG);
         }
 
         else if (strcmp(current.instruction, "MUL") == 0)
@@ -409,7 +417,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 {
                     result = executeAluOperation(result, val1 << i, "001", 0, &CARRY_FLAG);
                 }
-                printf("      [STEP] i=%d, val2 bit=%lld, Current result=%lld\n", i, (val2 >> i) & 1, result);
+                // printf("      [STEP] i=%d, val2 bit=%lld, Current result=%lld\n", i, (val2 >> i) & 1, result);
             }
 
             // ตั้งค่า register ด้วยผลลัพธ์สุดท้าย
@@ -420,8 +428,10 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             SIGN_FLAG = (result < 0);
             CARRY_FLAG = false; // Carry flag มักจะถูกรีเซ็ตหลังการคูณ
 
+            /*
             printf("      [INFO] MUL: %s = %lld * %lld -> ผลลัพธ์ %lld\n", current.operand1, val1, val2, result);
             printf("      [INFO] Flags: Z=%d, S=%d, C=%d\n", ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+            */
         }
         else if (strcmp(current.instruction, "DIV") == 0)
         {
@@ -443,7 +453,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
                 long long cmp_result = executeAluOperation(remainder, val2, "001", 1, &CARRY_FLAG);
 
-                printf("      [STEP] i=%d, Current Remainder=%lld, Divisor=%lld, CARRY_FLAG=%d\n", i, remainder, val2, CARRY_FLAG);
+                // printf("      [STEP] i=%d, Current Remainder=%lld, Divisor=%lld, CARRY_FLAG=%d\n", i, remainder, val2, CARRY_FLAG);
 
                 if (!CARRY_FLAG)
                 {
@@ -458,8 +468,10 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             SIGN_FLAG = (quotient < 0);
             CARRY_FLAG = false;
 
+            /*
             printf("      [INFO] DIV: %s = %lld / %lld -> ผลลัพธ์ %lld, เศษ %lld\n", current.operand1, val1, val2, quotient, remainder);
             printf("      [INFO] Flags: Z=%d, S=%d, C=%d\n", ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+            */
         }
 
         else if (strcmp(current.instruction, "PRINT") == 0)
@@ -504,23 +516,23 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             long long op1_val = getOperandValue(current.operand1);
             long long op2_val = getOperandValue(current.operand2);
 
-            printf("      [INFO] CMP: เริ่มประมวลผล %lld เปรียบเทียบกับ %lld\n", op1_val, op2_val);
+            // printf("      [INFO] CMP: เริ่มประมวลผล %lld เปรียบเทียบกับ %lld\n", op1_val, op2_val);
 
             // ขั้นตอนที่ 1: Invert op2_val (~op2_val) โดยใช้ executeAluOperation
             bool temp_carry_not = false;
             long long val2_invert = executeAluOperation(op2_val, 0, "111", 0, &temp_carry_not);
-            printf("      [DEBUG] CMP Step 1 (NOT): ~%lld (op2_val) -> %lld\n", op2_val, val2_invert);
+            // printf("      [DEBUG] CMP Step 1 (NOT): ~%lld (op2_val) -> %lld\n", op2_val, val2_invert);
 
             // ขั้นตอนที่ 2: Add 1 to inverted op2_val (Two's Complement)
             bool temp_carry_add1 = false;
             long long negated_op2_val = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_add1);
-            printf("      [DEBUG] CMP Step 2 (ADD 1): %lld + 1 -> %lld (Two's Complement)\n", val2_invert, negated_op2_val);
+              // printf("      [DEBUG] CMP Step 2 (ADD 1): %lld + 1 -> %lld (Two's Complement)\n", val2_invert, negated_op2_val);
 
             // ขั้นตอนที่ 3: Add op1_val and negated_op2_val
             bool carry_flag_temp = false;
             long long final_result_for_flags = executeAluOperation(op1_val, negated_op2_val, "001", 0, &carry_flag_temp);
             CARRY_FLAG = !carry_flag_temp; // Invert carry for subtract (borrow)
-            printf("      [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
+            // printf("      [DEBUG] CMP Step 3 (ADD): %lld + %lld (Two's Complement) -> %lld\n", op1_val, negated_op2_val, final_result_for_flags);
 
             // คำนวณ Overflow Flag: OV = (Sign_of_op1 == Sign_of_op2) && (Sign_of_op1 != Sign_of_result)
             // สำหรับการลบ (A-B), B ถูกทำ Two's Complement, ดังนั้นเราต้องดูเครื่องหมายของ A และ -B
@@ -541,7 +553,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             // --- จบส่วนที่แก้ไข ---
 
             // แสดงผลลัพธ์และ Flags สุดท้ายของ CMP
-            printf("      [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d, O=%d\n",
+            // printf("      [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d, O=%d\n",
                    op1_val, op2_val, final_result_for_flags, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG, OVERFLOW_FLAG);
         }
         else if (strcmp(current.instruction, "JMP") == 0 ||
@@ -579,7 +591,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                         pc = labelMap[i].index;
                         shouldJump = true;
                         label_found = true;
-                        printf("      [INFO] JUMP to '%s' (PC -> %d)\n", current.operand1, pc);
+                        // printf("      [INFO] JUMP to '%s' (PC -> %d)\n", current.operand1, pc);
                         break;
                     }
                 }
@@ -668,7 +680,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
     int else_jump_fix_stack[JUMP_STACK_SIZE];
     int else_stack_ptr = -1;
 
-    printf("\n--- Compiler: Stage 1 - Parsing and Generating Instructions ---\n");
+    // printf("\n--- Compiler: Stage 1 - Parsing and Generating Instructions ---\n");
 
     for (int i = 0; i < numLines; i++)
     {
@@ -707,12 +719,9 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 nextMemAddr++;
             }
         }
-        // 4. For loop: for(i = 1; i <= 12; i++)
-        // เพิ่มโค้ดส่วนนี้เข้าไปในคอมไพเลอร์ของคุณ
 
         else if (strncmp(trimmed_line, "for(", 4) == 0)
         {
-            // --- ส่วนของการ Parse (เหมือนเดิม) ---
             const char *for_content = trimmed_line + 4;
             const char *semicolon1 = strchr(for_content, ';');
             const char *semicolon2 = strchr(semicolon1 + 1, ';');
@@ -724,10 +733,11 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             cond[semicolon2 - (semicolon1 + 1)] = '\0';
             strncpy(update, semicolon2 + 1, paren_end - (semicolon2 + 1));
             update[paren_end - (semicolon2 + 1)] = '\0';
-
+/*
             printf("[DEBUG] Init part: '%s'\n", trim(init));
             printf("[DEBUG] Condition part: '%s'\n", trim(cond));
             printf("[DEBUG] Update part: '%s'\n", trim(update));
+            */
 
             // --- Part 1: Initialization (เหมือนเดิม) ---
             char initVar[50], initValStr[50];
@@ -753,8 +763,6 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             }
 
             // --- Part 2: Condition Check (Start of loop) ---
-
-            // 💡 --- LOGGING & FIX POINT --- 💡
             printf("\n[COMPILER_LOG] --- Entering FOR block ---\n");
 
             // สร้างและบันทึก Label สำหรับจุดเริ่มต้นของลูป
@@ -767,7 +775,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             addLabel(loop_start_label, instructionCount);
 
             // เพิ่ม Log เพื่อยืนยันการบันทึก Label
-            printf("[COMPILER_LOG] Registered loop START label '%s' at PC address %d\n", loop_start_label, instructionCount);
+         //   printf("[COMPILER_LOG] Registered loop START label '%s' at PC address %d\n", loop_start_label, instructionCount);
 
             // จัดการข้อมูล loop (Push stacks)
             block_type_stack[++block_stack_ptr] = BLOCK_FOR;
@@ -776,9 +784,8 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             strcpy(for_update_statement_stack[for_stack_ptr], trim(update));
 
             // เพิ่ม Log เพื่อดูสถานะของ Stack
-            printf("[COMPILER_LOG] Pushed FOR block. Current block_stack_ptr = %d\n", block_stack_ptr);
+           // printf("[COMPILER_LOG] Pushed FOR block. Current block_stack_ptr = %d\n", block_stack_ptr);
 
-            // ... ส่วนที่เหลือของโค้ดเหมือนเดิม ...
             char condVar[50], condOp[10], condVal[50];
             sscanf(trim(cond), "%s %s %s", condVar, condOp, condVal);
 
@@ -840,7 +847,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 char exit_label[20];
                 generate_new_label(exit_label);
 
-                printf("[COMPILER_LOG] Generated loop EXIT label '%s' for the conditional jump.\n", exit_label);
+                // printf("[COMPILER_LOG] Generated loop EXIT label '%s' for the conditional jump.\n", exit_label);
 
                 sprintf(instructions[instructionCount].instruction, "%s", jump_instruction);
                 sprintf(instructions[instructionCount].operand1, "%s", exit_label);
@@ -943,7 +950,6 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 char *clean_var_name = trim(varName);
                 int mem_addr = findVariable(clean_var_name, symbolTable, variableCount);
                 if (mem_addr == -1)
-                { /* ... Error Handling ... */
                     return NULL;
                 }
 
@@ -973,7 +979,6 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 char *clean_var_name = trim(varName);
                 int mem_addr = findVariable(clean_var_name, symbolTable, variableCount);
                 if (mem_addr == -1)
-                { /* ... Error Handling ... */
                     return NULL;
                 }
 
@@ -1301,11 +1306,13 @@ HANDLE openAndSetupSerialPort()
         goto cleanup;
     }
 
+    // เวลาในการทำงานต่างๆ 
     timeouts.ReadIntervalTimeout = 100;
     timeouts.ReadTotalTimeoutConstant = READ_TIMEOUT_MS;
     timeouts.ReadTotalTimeoutMultiplier = 0;
     timeouts.WriteTotalTimeoutConstant = 50;
     timeouts.WriteTotalTimeoutMultiplier = 10;
+    
     if (!SetCommTimeouts(hSerial, &timeouts))
     {
         printf("[ERROR] SetCommTimeouts failed.\n");
