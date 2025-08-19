@@ -24,7 +24,7 @@ void setup() {
   pinMode(INVERT_OUTPUT_PIN, INPUT);
   pinMode(CARRY_OUT_PIN, INPUT);
 
-  Serial.begin(9600);
+  Serial.begin(115200);
 }
 
 void loop() {
@@ -58,7 +58,7 @@ void loop() {
       digitalWrite(MUX_PIN_2, muxBit2);
       digitalWrite(MUX_PIN_1, muxBit1);
       digitalWrite(MUX_PIN_0, muxBit0);
-      delay(10);
+      delay(1);
       
       // ถ้าเป็น ADD/SUB operation (MUX code 001)
       if (muxBit2 == 0 && muxBit1 == 0 && muxBit0 == 1) {
@@ -72,7 +72,7 @@ void loop() {
         digitalWrite(MUX_PIN_2, 0);  // Set MUX to 010 for Carry
         digitalWrite(MUX_PIN_1, 1);
         digitalWrite(MUX_PIN_0, 0);
-        delay(10);
+        delay(1);
         
         int halfAdderCarry = digitalRead(CARRY_OUT_PIN);
         
