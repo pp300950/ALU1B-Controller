@@ -1,17 +1,18 @@
-
 ### 🔹 คำสั่งคอมไพล์ สำหรับ UNO
 ```powershell
 C:\Users\Administrator\Desktop\arduino-cli.exe compile -b arduino:avr:uno C:\Users\Administrator\Desktop\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino
 ```
 
 ```
-###🔹 คำสั่งอัปโหลด สำหรับ UNO
+##🔹 คำสั่งอัปโหลด สำหรับ UNO
 C:\Users\Administrator\Desktop\arduino-cli.exe upload -b arduino:avr:uno -p COM6 C:\Users\Administrator\Desktop\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino
 ```
+
 ```
-###🔹 คำสั่งรวม (คอมไพล์ + อัปโหลด) สำหรับ UNO
+##🔹 คำสั่งรวม (คอมไพล์ + อัปโหลด) สำหรับ UNO
 C:\Users\Administrator\Desktop\arduino-cli.exe compile --upload -b arduino:avr:uno -p COM6 C:\Users\Administrator\Desktop\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino
 ```
+
 ---
 
 # คู่มือการใช้งาน 1-Bit ALU Interactive Controller
