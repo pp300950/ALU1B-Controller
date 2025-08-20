@@ -1,0 +1,6 @@
+```c
+int status;
+status = 0; // Assume success initially.  Cannot check $? directly.  Requires OS-specific handling outside this simple language.
+print("Command execution status:",status,"\n"); //Placeholder for command success check
+
+```
