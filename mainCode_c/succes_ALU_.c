@@ -462,41 +462,43 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             printf("      [INFO] Flags: Z=%d, S=%d, C=%d\n", ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
         }
 
-        else if (strcmp(current.instruction, "PRINT") == 0)
+        if (strcmp(current.instruction, "PRINT") == 0)
         {
-            // กรณีที่ 1: มีทั้ง operand1 และ operand2 (เหมือนของเดิม)
-            // รูปแบบ: PRINT "ข้อความ", REG_A
-            if (strlen(current.operand2) > 0)
+            // ตรวจสอบว่า operand1 เป็น register หรือไม่ (ส่วนนี้ทำงานเร็วอยู่แล้ว)
+            if (strcmp(current.operand1, "REG_A") == 0 ||
+                strcmp(current.operand1, "REG_B") == 0 ||
+                strncmp(current.operand1, "MEM[", 4) == 0)
             {
-                long long valueToPrint = getOperandValue(current.operand2);
-                printf("\n>>> [OUTPUT] %s %lld <<<\n", current.operand1, valueToPrint);
+                // ถ้าใช่ ให้พิมพ์ค่าของมันออกมา
+                long long valueToPrint = getOperandValue(current.operand1);
+                printf("%lld", valueToPrint);
             }
-            // กรณีที่ 2: มีแค่ operand1
-            // ต้องตรวจสอบว่า operand1 คือ "ข้อความ" หรือ "ชื่อ Register"
-            else if (strlen(current.operand1) > 0)
+            else
             {
-                // ลองพยายามแปลง operand1 เป็นค่าตัวเลข/Register
-                // เราสามารถใช้ getOperandValue มาช่วยตัดสินใจได้
-                // โดยเช็คว่าถ้ามันไม่ใช่ register หรือ memory address และแปลงเป็นตัวเลขแล้วได้ 0,
-                // มีแนวโน้มว่ามันคือข้อความธรรมดา
-                bool isValue = (strcmp(current.operand1, "REG_A") == 0) ||
-                               (strcmp(current.operand1, "REG_B") == 0) ||
-                               (strncmp(current.operand1, "MEM[", 4) == 0) ||
-                               (atoll(current.operand1) != 0 || strcmp(current.operand1, "0") == 0);
+    
+                // ถ้าไม่ใช่ ให้ถือว่าเป็นข้อความธรรมดา
+                // สร้าง Buffer ชั่วคราวเพื่อเตรียมข้อความ
+                char processed_string[MAX_READ_BUFFER] = {0};
+                int buffer_index = 0;
+                const char *original_str = current.operand1;
 
-                if (isValue)
+                // วนลูปเพื่อจัดการ escape characters และคัดลอกลง Buffer
+                // การทำงานส่วนนี้เกิดใน Memory ซึ่งเร็วมาก
+                for (int i = 0; original_str[i] != '\0' && buffer_index < MAX_READ_BUFFER - 1; i++)
                 {
-                    // ถ้าเป็น Register หรือตัวเลข -> แสดงค่าของมัน
-                    // รูปแบบ: PRINT REG_A
-                    long long valueToPrint = getOperandValue(current.operand1);
-                    printf("\n>>> [OUTPUT] %lld <<<\n", valueToPrint);
+                    if (original_str[i] == '\\' && original_str[i + 1] == 'n')
+                    {
+                        processed_string[buffer_index++] = '\n'; // แปลง \n เป็นอักขระขึ้นบรรทัดใหม่
+                        i++; // ข้ามตัว n ไป
+                    }
+                    else
+                    {
+                        processed_string[buffer_index++] = original_str[i];
+                    }
                 }
-                else
-                {
-                    // ถ้าไม่น่าใช่ค่าตัวเลข/Register -> แสดงเป็นข้อความ
-                    // รูปแบบ: PRINT "Just a message"
-                    printf("\n>>> [OUTPUT] %s <<<\n", current.operand1);
-                }
+                
+                // สั่งพิมพ์ข้อความจาก Buffer ทั้งหมดในครั้งเดียว!
+                printf("%s", processed_string);
             }
         }
         else if (strcmp(current.instruction, "CMP") == 0)
