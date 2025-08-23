@@ -1,0 +1,123 @@
+// --- ขาควบคุมและอินพุต ---
+const int MUX_PIN_0 = 2;       // ขาควบคุม MUX บิตที่ 0
+const int MUX_PIN_1 = 3;       // ขาควบคุม MUX บิตที่ 1
+const int MUX_PIN_2 = 4;       // ขาควบคุม MUX บิตที่ 2
+const int SUB_ADD_PIN = 5;     // ขาควบคุมโหมดบวก/ลบ (0=บวก, 1=ลบ)
+const int A_INPUT_PIN = 6;       // อินพุต A
+const int B_INPUT_PIN = 7;       // อินพุต B
+
+// --- ขาเอาต์พุต ---
+const int NEGATIVE_OUTPUT_PIN = 8; // ขาเอาต์พุตแสดงค่าติดลบ (1=ติดลบ, 0=ไม่ติดลบ)
+const int RESULT_OUTPUT_PIN = 9;   // ขาเอาต์พุตแสดงผลลัพธ์ทั่วไปจาก MUX
+const int NOT_OUTPUT_PIN = 10;     // ขาเอาต์พุตสำหรับ NOT Gate โดยเฉพาะ
+const int CARRY_OUT_PIN = 11;    // ขาเอาต์พุตสำหรับค่าทด (Carry)
+
+// --- Setup Function ---
+void setup() {
+  // ตั้งค่าขาควบคุมและอินพุตของ ALU เป็น OUTPUT
+  pinMode(MUX_PIN_0, OUTPUT);
+  pinMode(MUX_PIN_1, OUTPUT);
+  pinMode(MUX_PIN_2, OUTPUT);
+  pinMode(SUB_ADD_PIN, OUTPUT);
+  pinMode(A_INPUT_PIN, OUTPUT);
+  pinMode(B_INPUT_PIN, OUTPUT);
+
+  // ตั้งค่าขาเอาต์พุตของ ALU เป็น INPUT
+  pinMode(NEGATIVE_OUTPUT_PIN, INPUT);
+  pinMode(RESULT_OUTPUT_PIN, INPUT);
+  pinMode(NOT_OUTPUT_PIN, INPUT);
+  pinMode(CARRY_OUT_PIN, INPUT);
+
+  // เริ่มต้นการสื่อสาร Serial และแสดงข้อความแนะนำ
+  Serial.begin(9600);
+  Serial.println("--- ALU 1-Bit Interactive Controller ---");
+  Serial.println("Enter command in format: MuxCode Sub/Add A B");
+  Serial.println("Example (1 + 1): 001 0 1 1");
+  Serial.println("Example (A NOT): 111 0 1 0");
+  Serial.println("----------------------------------------");
+}
+
+// --- Loop Function ---
+void loop() {
+  // ตรวจสอบว่ามีข้อมูลเข้ามาใน Serial หรือไม่
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n'); // อ่านข้อมูลเข้ามาทีละบรรทัด
+    input.trim(); // ลบช่องว่างหน้า-หลัง
+
+    // แยกข้อมูลด้วยช่องว่าง
+    int space1 = input.indexOf(' ');
+    int space2 = input.indexOf(' ', space1 + 1);
+    int space3 = input.indexOf(' ', space2 + 1);
+
+    // ตรวจสอบว่ารูปแบบถูกต้องหรือไม่ (มี 3 ช่องว่าง)
+    if (space1 > 0 && space2 > 0 && space3 > 0) {
+      String muxCodeStr = input.substring(0, space1);
+      String subAddPinStr = input.substring(space1 + 1, space2);
+      String aInputStr = input.substring(space2 + 1, space3);
+      String bInputStr = input.substring(space3 + 1);
+
+      // ตรวจสอบว่า MuxCode มี 3 ตัวอักษร
+      if (muxCodeStr.length() == 3) {
+        // แปลงค่า String เป็น int
+        int muxBit2 = muxCodeStr.charAt(0) - '0';
+        int muxBit1 = muxCodeStr.charAt(1) - '0';
+        int muxBit0 = muxCodeStr.charAt(2) - '0';
+        int subAddPin = subAddPinStr.toInt();
+        int aInput = aInputStr.toInt();
+        int bInput = bInputStr.toInt();
+
+        // --- ควบคุม ALU ---
+        // ตั้งค่าขาควบคุม MUX
+        digitalWrite(MUX_PIN_2, muxBit2);
+        digitalWrite(MUX_PIN_1, muxBit1);
+        digitalWrite(MUX_PIN_0, muxBit0);
+        
+        // ตั้งค่าขาบวก/ลบ
+        digitalWrite(SUB_ADD_PIN, subAddPin);
+        
+        // ตั้งค่าอินพุต A และ B
+        digitalWrite(A_INPUT_PIN, aInput);
+        digitalWrite(B_INPUT_PIN, bInput);
+
+        // หน่วงเวลาเล็กน้อยเพื่อให้วงจรทำงาน
+        delay(50);
+
+        // --- อ่านผลลัพธ์ ---
+        int muxCodeInt = (muxBit2 << 2) | (muxBit1 << 1) | muxBit0;
+        int resultOutput;
+        
+        // เลือกว่าจะอ่านผลลัพธ์จากขาไหนตาม MuxCode
+        if (muxCodeInt == 0b111) { // NOT operation
+          resultOutput = digitalRead(NOT_OUTPUT_PIN);
+        } else if (muxCodeInt == 0b010) { // Carry Out operation
+          resultOutput = digitalRead(CARRY_OUT_PIN);
+        } else { // Other logical/arithmetic operations
+          resultOutput = digitalRead(RESULT_OUTPUT_PIN);
+        }
+
+        int negativeOutput = digitalRead(NEGATIVE_OUTPUT_PIN);
+        int carryOutput = digitalRead(CARRY_OUT_PIN);
+
+        // --- แสดงผลลัพธ์ใน Serial Monitor ---
+        Serial.println("----------------------------------------");
+        Serial.print("Input MuxCode: "); Serial.println(muxCodeStr);
+        Serial.print("Input Sub/Add Pin: "); Serial.println(subAddPin);
+        Serial.print("Input A: "); Serial.println(aInput);
+        Serial.print("Input B: "); Serial.println(bInput);
+        Serial.println("---");
+        Serial.print("Digital Output (Result): "); Serial.println(resultOutput);
+        Serial.print("Digital Output (Negative Flag): "); Serial.println(negativeOutput);
+        // แสดง Carry Flag เฉพาะเมื่อเป็นฟังก์ชัน ADD/SUB เพื่อความชัดเจน
+        if (muxCodeInt == 0b001) {
+            Serial.print("Digital Output (Carry Flag): "); Serial.println(carryOutput);
+        }
+        Serial.println("----------------------------------------");
+
+      } else {
+        Serial.println("Error: MuxCode must be 3 bits long.");
+      }
+    } else {
+      Serial.println("Error: Invalid input format. Use: MuxCode Sub/Add A B");
+    }
+  }
+}
