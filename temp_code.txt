@@ -1,0 +1,6 @@
+int i;
+int result;
+for(i = 2; i <= 10; i++) {
+    result = 5 * i;
+    print("5 x ", i, " = ", result, "\n");
+}
