@@ -289,8 +289,10 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
 
     if (!num1 || !num2)
     {
-        if (num1) free(num1);
-        if (num2) free(num2);
+        if (num1)
+            free(num1);
+        if (num2)
+            free(num2);
         printf("[ERROR] Memory allocation failed\n");
         return 0;
     }
@@ -347,28 +349,32 @@ long long binaryOp(long long dec1, long long dec2, const char *op, bool *isNeg, 
     free(num2);
 
     *final_carry = (carry_in == 1);
-    
+
     long long finalDecimalResult = binaryToDecimal(result_bin);
     free(result_bin);
 
     // *** ปรับปรุง: ตรรกะการตรวจสอบค่าลบและ Carry Flag ***
     if (op_mode == 1) // สำหรับการลบ (Subtraction)
     {
-        if (carry_in == 1) { // ถ้ามี borrow (carry-in เป็น 1) แสดงว่าผลลัพธ์เป็นบวก
+        if (carry_in == 1)
+        { // ถ้ามี borrow (carry-in เป็น 1) แสดงว่าผลลัพธ์เป็นบวก
             *isNeg = false;
-        } else { // ถ้าไม่มี borrow แสดงว่าผลลัพธ์เป็นลบ
+        }
+        else
+        { // ถ้าไม่มี borrow แสดงว่าผลลัพธ์เป็นลบ
             *isNeg = true;
         }
     }
     else // สำหรับการบวก (Addition)
     {
         *isNeg = (finalDecimalResult > 127); // ตรวจสอบ Signed 8-bit (MSB=1 คือติดลบ)
-        if (*isNeg) {
+        if (*isNeg)
+        {
             // Logic สำหรับการแปลง 2's complement เป็นค่าติดลบที่ถูกต้อง
             finalDecimalResult = (signed char)finalDecimalResult;
         }
     }
-    
+
     return finalDecimalResult;
 }
 
@@ -801,39 +807,41 @@ int main()
 
     printf("\n--- เริ่มต้นการทำงานของโปรแกรมจำลอง Assembly ---\n");
 
-    // ตัวอย่างโปรแกรมจำลอง
-    /*  Instruction program[] = {
-          // กำหนดค่าเริ่มต้นให้กับ Memory
-           {"DEF", "0", "50"}, // Memory[0] = 50
-           {"DEF", "1", "45"}, // Memory[1] = 45
-           {"DEF", "2", "1"},  // Memory[2] = 1
-
-           // ทำการคำนวณ (50 - 45) + 1
-           {"LOAD", "REG_A", "0"}, // REG_A = Memory[0] (50)
-           {"LOAD", "REG_B", "1"}, // REG_B = Memory[1] (45)
-           {"SUB", "REG_A", "REG_B"},
-           {"PRINT", "ผลลัพธ์ SUB", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
-           {"ADD", "REG_A", "REG_B"},
-           {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, // เปลี่ยนให้ operand2 เป็นชื่อรีจิสเตอร์
-           {"HLT", "", ""}};
-           */
     Instruction program[] = {
-    // กำหนดค่าเริ่มต้นใน Memory
-    // ป้อนค่าได้ไม่เกิน 6 หลัก
-    {"DEF", "0", "99999999999999"},      // MEM[0] = 999
-    {"DEF", "1", "9999999999999"},      // MEM[1] = 333
+        // กำหนดค่าเริ่มต้นให้กับ Memory
+        {"DEF", "0", "50"}, // Memory[0] = 50
+        {"DEF", "1", "45"}, // Memory[1] = 45
+        {"DEF", "2", "1"},  // Memory[2] = 1
 
-    // โหลดค่าเข้าสู่ Register
-    {"LOAD", "REG_A", "0"},   // REG_A = 999
-    {"LOAD", "REG_B", "1"},   // REG_B = 333
+        // ทำการคำนวณ (50 - 45) + 1
+        {"LOAD", "REG_A", "0"}, // REG_A = Memory[0] (50)
+        {"LOAD", "REG_B", "1"}, // REG_B = Memory[1] (45)
+        {"LOAD", "REG_C", "2"}, // REG_c = Memory[2] (1)
+        {"SUB", "REG_A", "REG_B"},
+        {"PRINT", "ผลลัพธ์ SUB", "REG_A"},
+        {"ADD", "REG_A", "REG_C"},
+        {"PRINT", "ผลลัพธ์ ADD", "REG_A"}, 
+        {"HLT", "", ""}};
 
-    // ทำการลบ
-    {"ADD", "REG_A", "REG_B"}, // REG_A = 999 - 333
 
-    // สิ้นสุดโปรแกรม
-    {"HLT", "", ""},
-};
 
+    /*  Instruction program[] = {
+      // กำหนดค่าเริ่มต้นใน Memory
+      // ป้อนค่าได้ไม่เกิน 6 หลัก
+      {"DEF", "0", "99999999999999"},      // MEM[0] = 999
+      {"DEF", "1", "9999999999999"},      // MEM[1] = 333
+
+      // โหลดค่าเข้าสู่ Register
+      {"LOAD", "REG_A", "0"},   // REG_A = 999
+      {"LOAD", "REG_B", "1"},   // REG_B = 333
+
+      // ทำการลบ
+      {"ADD", "REG_A", "REG_B"}, // REG_A = 999 - 333
+
+      // สิ้นสุดโปรแกรม
+      {"HLT", "", ""},
+  };
+  */
     int numInstructions = sizeof(program) / sizeof(Instruction);
     executeInstructions(program, numInstructions);
 

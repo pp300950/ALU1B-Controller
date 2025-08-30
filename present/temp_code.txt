@@ -1,0 +1,7 @@
+int money_timmy;
+money_timmy = 200;
+int money_grandma;
+money_grandma = 500;
+int total_money;
+total_money = money_timmy + money_grandma;
+print("Timmi has a total of ", total_money, " baht.\n");

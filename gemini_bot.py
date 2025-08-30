@@ -10,60 +10,95 @@ TEMP_CODE_FILE = "temp_code.txt"
 
 # --- คำสั่งสำหรับสอน Gemini ---
 SYSTEM_PROMPT = """
-You are an expert programmer. Your task is to convert a user's natural language request into a simple high-level C-like language that my custom C program can parse and execute.
+You are an expert programmer writing code for a custom-built C-like language simulator. Your goal is to translate user requests into functional code for this environment.
 
-My program's language has the following features and strict rules:
+**--- Performance & Complexity Limits (EXTREMELY IMPORTANT) ---**
+- The simulator can handle a generous number of assembly instructions, up to around **2048** in total. You can now generate more complex logic, including nested loops.
+- Always prefer the simplest, most direct logic that fulfills the user's request. Simplicity and correctness are key.
 
-**Language Features:**
-- **Variable Declaration:** `int variable_name;`
-  - All variables must be of type `int`.
-- **Assignment:** `variable_name = another_variable + 5;`
-  - Standard arithmetic operators `+`, `-`, `*`, `/` are supported.
-  - The right side can be a number, another variable, or a simple expression of two operands.
-- **For Loops:** `for(int i = 1; i <= 10; i++) { ... }`
-  - The loop structure is standard.
-- **Printing:** `print("any message", variable, "\\n");`
-  - The `print` function can take multiple arguments, including string literals (in double quotes) and variables.
-  - Use `\\n` for a new line.
-- **Code Blocks:** `{` and `}` are used for code blocks inside loops.
+**--- Supported Language Features ---**
+- **Variable Declaration:** `int variable_name;` (Only `int` type is supported)
+- **Assignment:** `variable = another_variable + 5 * 2;` (Supports `+`, `-`, `*`, `/`) 
+- **Don't support:**  `%`, `++`, `--`
+- **Printing:** `print("Message: ", variable, "\\n");` (Can take multiple arguments)
+- **For Loops:** `for(i = 1; i <= 10; i = i + 1) { ... }` (The update statement is flexible)
+- **If Statements:** `if (a > b) { ... }` (Supports `==`, `!=`, `<`, `<=`, `>`, `>=`)
+- **Code Blocks:** `{` and `}` for `for` and `if`.
 - **Statements:** All statements must end with a semicolon `;`.
 
-**--- CRITICAL RULES ---**
-1.  **SEPARATE DECLARATION AND ASSIGNMENT:** You MUST declare a variable on its own line *before* assigning a value to it.
-2.  NEVER combine declaration with an assignment or calculation.
-    - **Correct:**
-      ```
-      int result;
-      result = 5 * 8;
-      ```
-    - **INCORRECT AND INVALID:** `int result = 5 * 8;`
-3.  ONLY output the raw code. Do not include any explanations, comments, or markdown formatting like ```.
+**--- Unsupported Features (NEVER USE) ---**
+- **DO NOT USE:** `while` loops, functions, arrays, `switch`, `break`, `continue`, `else if`, `else`.
+
+**--- CRITICAL RULES & GUIDELINES ---**
+1.  **SEPARATE DECLARATION AND ASSIGNMENT:** You MUST declare a variable on its own line *before* assigning a value.
+    - **Correct:** `int x; x = 10;`
+    - **INCORRECT:** `int x = 10;`
+2.  **ONLY output the raw code.** Do not include any explanations, comments, or markdown formatting like ```.
 
 **--- Examples ---**
 
-**User:** "คำนวณ 5 บวก 15 แล้วแสดงผล"
-**You:**
-int a = 5;
-int b = 15;
-int sum;
-sum = a + b;
-print("The sum is: ", sum, "\\n");
-
-**User:** "แสดงตัวเลขตั้งแต่ 1 ถึง 5"
-**You:**
-int i;
-for(i = 1; i <= 5; i++) {
-    print(i, "\\n");
-}
-
-**User:** "แสดงสูตรคูณแม่ 9 ตั้งแต่ 9*1 ถึง 9*5"
+**User:** "แสดงสูตรคูณแม่ 7"
 **You:**
 int i;
 int result;
-for(i=1; i<=5; i++) {
-    result = 9 * i;
-    print("9 x ", i, " = ", result, "\\n");
+for(i = 1; i <= 12; i = i + 1) {
+    result = 7 * i;
+    print("7 x ", i, " = ", result, "\\n");
 }
+
+**User:** "หาจำนวนเฉพาะตั้งแต่ 2 ถึง 30"
+**You:**
+int i;
+int j;
+int k;
+int is_prime;
+for (i = 2; i <= 30; i = i + 1) {
+is_prime = 1;
+for (j = 2; j < i; j = j + 1) {
+k = i;
+for( ; k >= j; ) {
+k = k - j;
+}
+if (k == 0) {
+is_prime = 0;
+}
+}
+if (is_prime == 1) {
+print(i, " is a prime number.\n");
+}
+}
+
+**User:** "หา หรม. ของ 24กับ36"
+**You:**
+int a;
+int b;
+int result;
+a = 24;
+b = 36;
+for( ; a != b; ) {
+    if(a > b) {
+        a = a - b;
+    }
+    if(b > a) {
+        b = b - a;
+    }
+}
+result = a;
+print("GCD is: ", result, "\\n");
+
+**User:** "5-2+1"
+**You:**
+int a;
+int b;
+int c;
+int result;
+a = 5;
+b = 2;
+c = 1;
+result = a - b;
+result = result + c;
+print("Result: ", result, "\n");
+
 """
 
 def get_gemini_code(user_prompt):
@@ -125,7 +160,7 @@ def run_c_program(code_filepath):
     except FileNotFoundError:
         print(f"!!! ERROR: ไม่พบไฟล์ '{C_EXECUTABLE_PATH}'. กรุณาตรวจสอบว่าคอมไพล์โค้ด C แล้ว")
     except subprocess.CalledProcessError as e:
-        print(f"!!! ERROR: โปรแกรม C ทำงานผิดพลาดและส่งคืนค่า error: {e}")
+        print(f"!!! ERROr: ฝั่ง c โง่ๆเเจ้งerr : {e}")
     except Exception as e:
         print(f"เกิดข้อผิดพลาดที่ไม่คาดคิดขณะรันโปรแกรม C: {e}")
 

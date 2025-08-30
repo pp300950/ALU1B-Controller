@@ -16,7 +16,7 @@
 #define MAX_READ_BUFFER 256
 
 #define MAX_MEMORY 50
-#define MAX_INSTRUCTIONS 2048
+#define MAX_INSTRUCTIONS 8192
 #define MAX_VARIABLES 50
 #define JUMP_STACK_SIZE 20
 #define STACK_SIZE 1024
@@ -33,8 +33,7 @@ long long REG_A = 0;
 long long REG_B = 0;
 long long MEMORY[MAX_MEMORY];
 long long STACK[STACK_SIZE];
-int sp = -1;                            // Stack Pointer
-long long BINARY_INSTRUCTION_COUNT = 0; // จำนวนคำสั่งที่รันไปแล้ว
+int sp = -1; // Stack Pointer
 
 // --- Forward Declarations ---
 typedef struct
@@ -107,19 +106,7 @@ bool sendAndReceiveData(const char *dataToSend, int *resultOutput, int *carryOut
     return false;
 }
 
-int highestBit(long long x)
-{
-    if (x == 0)
-        return 0;
-    int bit = 63;
-    while (bit > 0 && ((x >> bit) & 1) == 0)
-    {
-        bit--;
-    }
-    return bit;
-}
-
-#define NUM_BITS 64
+#define NUM_BITS 32
 long long executeAluOperation(long long op1, long long op2, const char *muxCode, int subAddFlag, bool *final_carry)
 {
     unsigned long long result_raw = 0;
@@ -127,30 +114,25 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
     /*printf("      [DEBUG] ALU(%d-bit) Input: op1=%lld, op2=%lld, sub=%d\n", NUM_BITS, op1, op2, subAddFlag);
      */
-
-    int max_bit = highestBit(op1);
-    int max_bit2 = highestBit(op2);
-    int limit = (max_bit > max_bit2 ? max_bit : max_bit2) + 1; // +1 เผื่อ carry
-
-    for (int i = 0; i < limit; i++)
+    // วนลูปเพื่อประมวลผลทุกบิตโดยไม่มีเงื่อนไข
+    for (int i = 0; i < NUM_BITS; i++)
     {
-
         int bitA = (op1 >> i) & 1;
         int bitB = (op2 >> i) & 1;
         int alu_result_bit = 0, alu_carry_out = 0;
 
         // --- ลบ IF/ELSE BLOCK ที่เป็นปัญหาออก ---
         // ส่งคำสั่งไปยัง ALU สำหรับทุกๆ บิตเสมอ
-        char command[64];
+        char command[32];
         snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
 
         if (!sendAndReceiveData(command, &alu_result_bit, &alu_carry_out))
         {
             printf("[FATAL] Hardware communication failed at bit %d. Aborting.\n", i);
+            // เพิ่มการพิมพ์ command ที่ล้มเหลว
+            printf("        Failed command: %s", command);
             return 0; // Error
         }
-
-        BINARY_INSTRUCTION_COUNT++; // นับจำนวนคำสั่งที่ส่งไปยังฮาร์ดแวร์
 
         // สร้างผลลัพธ์จากบิตที่ได้กลับมา
         if (alu_result_bit)
@@ -420,7 +402,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
             long long result = 0;
 
-            for (int i = 0; i < 64; i++)
+            for (int i = 0; i < 32; i++)
             {
                 // ตรวจสอบบิตที่ i ของตัวคูณ (val2)
                 if ((val2 >> i) & 1)
@@ -454,55 +436,36 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 break;
             }
 
-            // --- จัดการเครื่องหมาย ---
-            bool result_is_negative = (val1 < 0) ^ (val2 < 0);
-            long long abs_val1 = (val1 < 0) ? -val1 : val1;
-            long long abs_val2 = (val2 < 0) ? -val2 : val2;
+            // --- ส่วนที่แก้ไข ---
+            // 1. คำนวณค่าลบของตัวหาร (Two's Complement) เตรียมไว้ก่อนลูป
+            bool temp_carry;
+            long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry);
+            long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry);
 
-            long long remainder = abs_val1;
+            long long remainder = 0;
             long long quotient = 0;
+            const int num_bits_div = 32; // 2. แก้ไข: ลดลูปเหลือ 32 รอบก็เพียงพอสำหรับ int
 
-            // หาบิตสูงสุดที่ divisor << shift <= dividend
-            int shift = 0;
-            while ((abs_val2 << (shift + 1)) > 0 && (abs_val2 << (shift + 1)) <= remainder)
+            for (int i = num_bits_div - 1; i >= 0; i--)
             {
-                shift++;
-            }
+                remainder = (remainder << 1) | ((val1 >> i) & 1);
 
-            // วนจาก shift ลงมา
-            for (int i = shift; i >= 0; i--)
-            {
-                long long divisor_shifted = abs_val2 << i;
+                // 3. ลองลบโดยการ "บวกด้วยค่าลบ" (วิธีที่ถูกต้อง)
+                long long test_remainder = executeAluOperation(remainder, negated_val2, "001", 0, &CARRY_FLAG);
 
-                if (remainder >= divisor_shifted)
+                // 4. ตรวจสอบผลลัพธ์: ถ้าผลลัพธ์ไม่ติดลบ แสดงว่าลบได้
+                if (test_remainder >= 0)
                 {
-                    // ถ้าลบได้ → เรียก ALU ลบจริง
-                    bool temp_carry;
-                    long long divisor_invert = executeAluOperation(divisor_shifted, 0, "111", 0, &temp_carry);
-                    long long negated_divisor = executeAluOperation(divisor_invert, 1, "001", 0, &temp_carry);
-
-                    remainder = executeAluOperation(remainder, negated_divisor, "001", 0, &temp_carry);
-                    quotient |= (1LL << i);
-
-                    // Early Exit → ถ้า remainder = 0 แล้วก็จบเลย
-                    if (remainder == 0)
-                        break;
-                }
-                else
-                {
-                    // ไม่จำเป็นต้องส่งไป ALU ถ้า remainder < divisor_shifted
-                    continue;
+                    remainder = test_remainder;
+                    quotient |= (1LL << i); // ตั้งบิตของผลหาร
                 }
             }
-
-            if (result_is_negative)
-                quotient = -quotient;
+            // --- จบส่วนที่แก้ไข ---
 
             setRegisterValue(current.operand1, quotient);
             ZERO_FLAG = (quotient == 0);
             SIGN_FLAG = (quotient < 0);
         }
-
         else if (strcmp(current.instruction, "MOD") == 0)
         {
             long long val1 = getOperandValue(current.operand1); // Dividend
@@ -513,7 +476,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 break;
             }
 
-            // --- ส่วนที่แก้ไข (ใช้ตรรกะเดียวกับ DIV) ---
+            // --- ส่วนที่แก้ไข (ใช้ตรรกะที่ถูกต้องเหมือนกับ DIV) ---
             bool temp_carry;
             long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry);
             long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry);
@@ -527,7 +490,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                 remainder = (remainder << 1) | ((val1 >> i) & 1);
                 long long test_remainder = executeAluOperation(remainder, negated_val2, "001", 0, &CARRY_FLAG);
 
-                if ((test_remainder >= 0) || (remainder == val2))
+                if (test_remainder >= 0)
                 {
                     remainder = test_remainder;
                     quotient |= (1LL << i);
@@ -538,6 +501,56 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             setRegisterValue(current.operand1, remainder); // <-- ผลลัพธ์ของ MOD คือ remainder
             ZERO_FLAG = (remainder == 0);
             SIGN_FLAG = (remainder < 0);
+        }
+        else if (strcmp(current.instruction, "SHL") == 0) // Shift Left
+        {
+            long long val1 = getOperandValue(current.operand1);
+            long long shift_amount = getOperandValue(current.operand2);
+            long long multiplier = 1LL << shift_amount;
+
+            // จำลองการคูณโดยใช้ Shift-and-Add บน ALU
+            long long result = 0;
+            for (int i = 0; i < 32; i++)
+            {
+                if ((multiplier >> i) & 1)
+                {
+                    result = executeAluOperation(result, val1 << i, "001", 0, &CARRY_FLAG);
+                }
+            }
+
+            setRegisterValue(current.operand1, result);
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = (result < 0);
+        }
+        else if (strcmp(current.instruction, "SHR") == 0) // Shift Right
+        {
+            long long val1 = getOperandValue(current.operand1);
+            long long shift_amount = getOperandValue(current.operand2);
+            long long divisor = 1LL << shift_amount; // คำนวณ 2^B
+
+            if (divisor == 0)
+            { /* Handle error */
+                break;
+            }
+
+            // ใช้ ALU DIV เพื่อคำนวณ A / (2^B)
+            // (คัดลอก Logic การหารจาก DIV มาใช้)
+            long long remainder = 0;
+            long long quotient = 0;
+            for (int i = 63; i >= 0; i--)
+            {
+                remainder = (remainder << 1) | ((val1 >> i) & 1);
+                long long cmp_result = executeAluOperation(remainder, divisor, "001", 1, &CARRY_FLAG);
+                if (!CARRY_FLAG)
+                {
+                    remainder = cmp_result;
+                    quotient = executeAluOperation(quotient, 1LL << i, "001", 0, &CARRY_FLAG);
+                }
+            }
+
+            setRegisterValue(current.operand1, quotient);
+            ZERO_FLAG = (quotient == 0);
+            SIGN_FLAG = (quotient < 0);
         }
 
         else if (strcmp(current.instruction, "PRINT") == 0)
@@ -616,6 +629,35 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             /*printf("      [INFO] CMP Finished: %lld vs %lld. ผลลัพธ์จากการลบ (เพื่อ Flags เท่านั้น)=%lld. Flags: Z=%d, S=%d, C=%d, O=%d\n",
                    op1_val, op2_val, final_result_for_flags, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG, OVERFLOW_FLAG);
                    */
+        } // --- Stack Operations ---
+        else if (strcmp(current.instruction, "PUSH") == 0)
+        {
+            if (sp < STACK_SIZE - 1)
+            {
+                sp++;
+                STACK[sp] = getOperandValue(current.operand1);
+                /* printf("      [INFO] PUSH %s (Value: %lld). SP is now %d\n", current.operand1, STACK[sp], sp); */
+            }
+            else
+            {
+                /* printf("      [ERROR] Stack Overflow!\n"); */
+                break;
+            }
+        }
+        else if (strcmp(current.instruction, "POP") == 0)
+        {
+            if (sp > -1)
+            {
+                long long value = STACK[sp];
+                sp--;
+                setRegisterValue(current.operand1, value);
+                /* printf("      [INFO] POP to %s (Value: %lld). SP is now %d\n", current.operand1, value, sp); */
+            }
+            else
+            {
+                /* printf("      [ERROR] Stack Underflow!\n"); */
+                break;
+            }
         }
         else if (strcmp(current.instruction, "JMP") == 0 ||
                  strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0 ||
@@ -713,85 +755,6 @@ char *trim(char *str)
     return str;
 }
 
-// ฟังก์ชันช่วยแปลง expression เป็น sequence ของ ALU instructions
-int parseExpression(const char *expr, Instruction *instructions, int instructionCount,
-                    Variable *symbolTable, int variableCount)
-{
-    char expr_copy[256];
-    strcpy(expr_copy, expr);
-
-    char *token = strtok(expr_copy, " ");
-    int first = 1;
-    char op[5];
-
-    while (token != NULL)
-    {
-        if (first)
-        {
-            // operand ตัวแรก -> โหลดเข้า REG_A
-            int addr = findVariable(token, symbolTable, variableCount);
-            if (addr != -1)
-            {
-                sprintf(instructions[instructionCount].instruction, "LOAD");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%d", addr);
-            }
-            else
-            {
-                sprintf(instructions[instructionCount].instruction, "MOV");
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "%s", token);
-            }
-            instructionCount++;
-            first = 0;
-        }
-        else
-        {
-            if (strcmp(token, "+") == 0 || strcmp(token, "-") == 0 ||
-                strcmp(token, "*") == 0 || strcmp(token, "/") == 0)
-            {
-                // token นี้คือ operator
-                strcpy(op, token);
-            }
-            else
-            {
-                // token นี้คือ operand
-                int addr = findVariable(token, symbolTable, variableCount);
-                if (addr != -1)
-                {
-                    sprintf(instructions[instructionCount].instruction, "LOAD");
-                    sprintf(instructions[instructionCount].operand1, "REG_B");
-                    sprintf(instructions[instructionCount].operand2, "%d", addr);
-                }
-                else
-                {
-                    sprintf(instructions[instructionCount].instruction, "MOV");
-                    sprintf(instructions[instructionCount].operand1, "REG_B");
-                    sprintf(instructions[instructionCount].operand2, "%s", token);
-                }
-                instructionCount++;
-
-                // apply operator (REG_A op REG_B)
-                if (strcmp(op, "+") == 0)
-                    sprintf(instructions[instructionCount].instruction, "ADD");
-                else if (strcmp(op, "-") == 0)
-                    sprintf(instructions[instructionCount].instruction, "SUB");
-                else if (strcmp(op, "*") == 0)
-                    sprintf(instructions[instructionCount].instruction, "MUL");
-                else if (strcmp(op, "/") == 0)
-                    sprintf(instructions[instructionCount].instruction, "DIV");
-
-                sprintf(instructions[instructionCount].operand1, "REG_A");
-                sprintf(instructions[instructionCount].operand2, "REG_B");
-                instructionCount++;
-            }
-        }
-        token = strtok(NULL, " ");
-    }
-
-    return instructionCount;
-}
-
 Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLines, int *outNumInstructions)
 {
     Instruction *instructions = (Instruction *)malloc(sizeof(Instruction) * MAX_INSTRUCTIONS);
@@ -836,6 +799,9 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
         char varName[50], rightHandSide[200], message[100];
         char lhs[50], op[10], rhs[50];
 
+        // หา Keyword push หรือ pop
+        char keyword[10], operand[50];
+
         // 1. Declaration: int A; or int A = 10;
         if (strncmp(trimmed_line, "int ", 4) == 0)
         {
@@ -859,6 +825,51 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 sprintf(instructions[instructionCount].operand2, "%d", value);
                 instructionCount++;
                 nextMemAddr++;
+            }
+        }
+        else if (sscanf(trimmed_line, "%s %s", keyword, operand) == 2)
+        {
+            char *clean_operand = trim(strtok(operand, ";"));
+
+            if (strcmp(keyword, "push") == 0)
+            {
+                int addr = findVariable(clean_operand, symbolTable, variableCount);
+                if (addr != -1)
+                {
+                    // โหลดค่าจากตัวแปรเข้า REG_A ก่อน push
+                    sprintf(instructions[instructionCount].instruction, "LOAD");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                    sprintf(instructions[instructionCount].operand2, "%d", addr);
+                    instructionCount++;
+                    sprintf(instructions[instructionCount].instruction, "PUSH");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                }
+                else
+                {
+                    // ถ้าเป็นตัวเลข ก็ MOV เข้า REG_A ก่อน
+                    sprintf(instructions[instructionCount].instruction, "MOV");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                    sprintf(instructions[instructionCount].operand2, "%s", clean_operand);
+                    instructionCount++;
+                    sprintf(instructions[instructionCount].instruction, "PUSH");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                }
+                instructionCount++;
+            }
+            else if (strcmp(keyword, "pop") == 0)
+            {
+                int addr = findVariable(clean_operand, symbolTable, variableCount);
+                if (addr != -1)
+                {
+                    // POP ค่าลง REG_A แล้วค่อย STORE กลับไปที่ตัวแปร
+                    sprintf(instructions[instructionCount].instruction, "POP");
+                    sprintf(instructions[instructionCount].operand1, "REG_A");
+                    instructionCount++;
+                    sprintf(instructions[instructionCount].instruction, "STORE");
+                    sprintf(instructions[instructionCount].operand1, "%d", addr);
+                    sprintf(instructions[instructionCount].operand2, "REG_A");
+                    instructionCount++;
+                }
             }
         }
         // 4. For loop: for(i = 1; i <= 12; i++)
@@ -930,7 +941,6 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             // เพิ่ม Log เพื่อดูสถานะของ Stack
             // printf("[COMPILER_LOG] Pushed FOR block. Current block_stack_ptr = %d\n", block_stack_ptr);
 
-            // ... ส่วนที่เหลือของโค้ดเหมือนเดิม ...
             char condVar[50], condOp[10], condVal[50];
             sscanf(trim(cond), "%s %s %s", condVar, condOp, condVal);
 
@@ -979,7 +989,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             else if (strcmp(condOp, ">") == 0)
                 strcpy(jump_instruction, "JLE"); // jump if <=
             else if (strcmp(condOp, ">=") == 0)
-                strcpy(jump_instruction, "JL"); // jump if <
+                strcpy(jump_instruction, "JLT"); // ✅ ใช้ JLT แทน
 
             else
             {
@@ -1009,6 +1019,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             char *clean_var_name = trim(varName);
             char *clean_rhs = trim(strtok(rightHandSide, ";"));
             int dest_addr = findVariable(clean_var_name, symbolTable, variableCount);
+
             if (dest_addr == -1)
             {
                 printf("ERROR: Variable '%s' not declared.\n", clean_var_name);
@@ -1016,11 +1027,65 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 return NULL;
             }
 
-            // 🔹 ใช้ parser ใหม่
-            instructionCount = parseExpression(clean_rhs, instructions, instructionCount,
-                                               symbolTable, variableCount);
+            char *token = strtok(clean_rhs, " "); // แยกส่วนแรก (ตัวแปรหรือตัวเลข)
 
-            // STORE ผลลัพธ์กลับเข้า memory
+            // 1. โหลดค่าแรกเข้าไปใน REG_A
+            int first_addr = findVariable(token, symbolTable, variableCount);
+            if (first_addr != -1)
+            {
+                sprintf(instructions[instructionCount].instruction, "LOAD");
+                sprintf(instructions[instructionCount].operand1, "REG_A");
+                sprintf(instructions[instructionCount].operand2, "%d", first_addr);
+            }
+            else
+            {
+                sprintf(instructions[instructionCount].instruction, "MOV");
+                sprintf(instructions[instructionCount].operand1, "REG_A");
+                sprintf(instructions[instructionCount].operand2, "%s", token);
+            }
+            instructionCount++;
+
+            // 2. วนลูปสำหรับ Operator และ Operand ที่เหลือ
+            while ((token = strtok(NULL, " ")) != NULL)
+            {
+                char *op = token;          // ตัวดำเนินการ (+, -, *, /)
+                token = strtok(NULL, " "); // ตัวแปร/ตัวเลขถัดไป
+                if (token == NULL)
+                    break; // จบลูปถ้าไม่มี operand ตามมา
+
+                // โหลด Operand ตัวถัดไปเข้า REG_B
+                int next_addr = findVariable(token, symbolTable, variableCount);
+                if (next_addr != -1)
+                {
+                    sprintf(instructions[instructionCount].instruction, "LOAD");
+                    sprintf(instructions[instructionCount].operand1, "REG_B");
+                    sprintf(instructions[instructionCount].operand2, "%d", next_addr);
+                }
+                else
+                {
+                    sprintf(instructions[instructionCount].instruction, "MOV");
+                    sprintf(instructions[instructionCount].operand1, "REG_B");
+                    sprintf(instructions[instructionCount].operand2, "%s", token);
+                }
+                instructionCount++;
+
+                // สร้างคำสั่งคำนวณ (ผลลัพธ์จะอยู่ใน REG_A)
+                if (strcmp(op, "+") == 0)
+                    sprintf(instructions[instructionCount].instruction, "ADD");
+                else if (strcmp(op, "-") == 0)
+                    sprintf(instructions[instructionCount].instruction, "SUB");
+                else if (strcmp(op, "*") == 0)
+                    sprintf(instructions[instructionCount].instruction, "MUL");
+                else if (strcmp(op, "/") == 0)
+                    sprintf(instructions[instructionCount].instruction, "DIV");
+                else if (strcmp(op, "%") == 0)
+                    sprintf(instructions[instructionCount].instruction, "MOD");
+                sprintf(instructions[instructionCount].operand1, "REG_A");
+                sprintf(instructions[instructionCount].operand2, "REG_B");
+                instructionCount++;
+            }
+
+            // 3. เก็บผลลัพธ์สุดท้ายจาก REG_A กลับไปที่หน่วยความจำ
             sprintf(instructions[instructionCount].instruction, "STORE");
             sprintf(instructions[instructionCount].operand1, "%d", dest_addr);
             sprintf(instructions[instructionCount].operand2, "REG_A");
@@ -1247,37 +1312,81 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
 
             if (current_block == BLOCK_FOR)
             {
-                // --- Update i++ ---
                 char update_statement[100];
                 strcpy(update_statement, for_update_statement_stack[for_stack_ptr]);
 
-                char update_var[50];
-                if (sscanf(update_statement, "%[a-zA-Z0-9_]++", update_var) == 1)
+                // เราจะใช้ตรรกะเดียวกับการประมวลผล Assignment ทั่วไป
+                char varName[50], rightHandSide[200];
+                if (sscanf(update_statement, "%s = %[^\n]", varName, rightHandSide) == 2)
                 {
-                    int var_addr = findVariable(update_var, symbolTable, variableCount);
-                    if (var_addr != -1)
+                    char *clean_var_name = trim(varName);
+                    char *clean_rhs = trim(rightHandSide);
+                    int dest_addr = findVariable(clean_var_name, symbolTable, variableCount);
+
+                    if (dest_addr != -1)
                     {
-                        // LOAD i -> REG_A
-                        sprintf(instructions[instructionCount].instruction, "LOAD");
-                        sprintf(instructions[instructionCount].operand1, "REG_A");
-                        sprintf(instructions[instructionCount].operand2, "%d", var_addr);
+                        // โค้ดส่วนนี้จะเหมือนกับส่วนประมวลผล Assignment (A = B + C) ทุกประการ
+                        // แค่เปลี่ยน input จาก trimmed_line เป็น clean_rhs
+
+                        char *token = strtok(clean_rhs, " ");
+
+                        // 1. โหลดค่าแรกเข้าไปใน REG_A
+                        int first_addr = findVariable(token, symbolTable, variableCount);
+                        if (first_addr != -1)
+                        {
+                            sprintf(instructions[instructionCount].instruction, "LOAD");
+                            sprintf(instructions[instructionCount].operand1, "REG_A");
+                            sprintf(instructions[instructionCount].operand2, "%d", first_addr);
+                        }
+                        else
+                        {
+                            sprintf(instructions[instructionCount].instruction, "MOV");
+                            sprintf(instructions[instructionCount].operand1, "REG_A");
+                            sprintf(instructions[instructionCount].operand2, "%s", token);
+                        }
                         instructionCount++;
 
-                        // MOV 1 -> REG_B
-                        sprintf(instructions[instructionCount].instruction, "MOV");
-                        sprintf(instructions[instructionCount].operand1, "REG_B");
-                        sprintf(instructions[instructionCount].operand2, "1");
-                        instructionCount++;
+                        // 2. วนลูปสำหรับ Operator และ Operand ที่เหลือ
+                        while ((token = strtok(NULL, " ")) != NULL)
+                        {
+                            char *op = token;
+                            token = strtok(NULL, " ");
+                            if (token == NULL)
+                                break;
 
-                        // ADD REG_A, REG_B
-                        sprintf(instructions[instructionCount].instruction, "ADD");
-                        sprintf(instructions[instructionCount].operand1, "REG_A");
-                        sprintf(instructions[instructionCount].operand2, "REG_B");
-                        instructionCount++;
+                            int next_addr = findVariable(token, symbolTable, variableCount);
+                            if (next_addr != -1)
+                            {
+                                sprintf(instructions[instructionCount].instruction, "LOAD");
+                                sprintf(instructions[instructionCount].operand1, "REG_B");
+                                sprintf(instructions[instructionCount].operand2, "%d", next_addr);
+                            }
+                            else
+                            {
+                                sprintf(instructions[instructionCount].instruction, "MOV");
+                                sprintf(instructions[instructionCount].operand1, "REG_B");
+                                sprintf(instructions[instructionCount].operand2, "%s", token);
+                            }
+                            instructionCount++;
 
-                        // STORE REG_A -> i
+                            if (strcmp(op, "+") == 0)
+                                sprintf(instructions[instructionCount].instruction, "ADD");
+                            else if (strcmp(op, "-") == 0)
+                                sprintf(instructions[instructionCount].instruction, "SUB");
+                            else if (strcmp(op, "*") == 0)
+                                sprintf(instructions[instructionCount].instruction, "MUL");
+                            else if (strcmp(op, "/") == 0)
+                                sprintf(instructions[instructionCount].instruction, "DIV");
+                            else if (strcmp(op, "%") == 0)
+                                sprintf(instructions[instructionCount].instruction, "MOD");
+                            sprintf(instructions[instructionCount].operand1, "REG_A");
+                            sprintf(instructions[instructionCount].operand2, "REG_B");
+                            instructionCount++;
+                        }
+
+                        // 3. เก็บผลลัพธ์สุดท้ายจาก REG_A กลับไปที่หน่วยความจำ
                         sprintf(instructions[instructionCount].instruction, "STORE");
-                        sprintf(instructions[instructionCount].operand1, "%d", var_addr);
+                        sprintf(instructions[instructionCount].operand1, "%d", dest_addr);
                         sprintf(instructions[instructionCount].operand2, "REG_A");
                         instructionCount++;
                     }
@@ -1460,22 +1569,10 @@ bool executeArduinoCLI(const char *cliPath, const char *board, const char *port,
     return true;
 }
 
-int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
+int main()
 {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
-
-    clock_t start_time, end_time;
-    double cpu_time_used;
-
-    if (argc < 2)
-    {
-        printf("[FATAL] Usage: %s <path_to_code_file>\n", argv[0]);
-        printf("[FATAL] This program is intended to be called by a script.\n");
-        return 1;
-    }
-    const char *codeFilePath = argv[1];
-    // --------------------------------------------------------
 
     const char *arduinoCliPath = "C:\\Users\\Administrator\\Desktop\\arduino-cli.exe";
     const char *boardType = "arduino:avr:uno";
@@ -1496,72 +1593,43 @@ int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
         return 1;
     }
 
-    // --- ส่วนที่แก้ไข: อ่านโค้ดจากไฟล์ที่ระบุ ---
-    char **highLevelProgram = NULL;
-    int numHighLevelLines = 0;
-    FILE *file = fopen(codeFilePath, "r");
-    if (file == NULL)
-    {
-        printf("[FATAL] Could not open code file: %s\n", codeFilePath);
-        CloseHandle(hSerial);
-        return 1;
-    }
+    printf("\n--- Starting Program Simulation ---\n");
 
-    char lineBuffer[512];
-    while (fgets(lineBuffer, sizeof(lineBuffer), file) != NULL)
-    {
-        highLevelProgram = (char **)realloc(highLevelProgram, sizeof(char *) * (numHighLevelLines + 1));
-        if (highLevelProgram == NULL)
-        {
-            printf("[FATAL] Memory allocation failed!\n");
-            fclose(file);
-            CloseHandle(hSerial);
-            return 1;
-        }
-        // ลบ \n หรือ \r\n ที่อาจติดมาท้ายบรรทัด
-        lineBuffer[strcspn(lineBuffer, "\r\n")] = 0;
-        highLevelProgram[numHighLevelLines] = _strdup(lineBuffer);
-        numHighLevelLines++;
-    }
-    fclose(file);
-    // ---------------------------------------------
+    // ในฟังก์ชัน main()
+    const char *highLevelProgram[] = {
+        "print(\"--- Multiplication Table for 5 ---\\n\");", // เพิ่ม \n ตรงนี้ด้วยก็ได้
+        "int i;",
+        "int result;",
+        "for(i = 1; i <= 12; i = i + 1) {",
+        "    result = 5 * i;",
+        "    print(\"5 x \");", // เพิ่มการแสดงผลให้สวยงาม
+        "    print(i);",
+        "    print(\" = \");",
+        "    print(result);",
+        "    print(\"\\n\");", // << บรรทัดสำคัญ: ขึ้นบรรทัดใหม่
+        "}",
+        "print(\"#### จบการทำงาน ####\\n\");",
+    };
 
-    // เริ่มจับเวลา
-    start_time = clock();
+    int numHighLevelLines = sizeof(highLevelProgram) / sizeof(const char *);
 
     int numGeneratedInstructions = 0;
-    Instruction *program = parseAndGenerateInstructions((const char **)highLevelProgram, numHighLevelLines, &numGeneratedInstructions);
+    Instruction *program = parseAndGenerateInstructions(highLevelProgram, numHighLevelLines, &numGeneratedInstructions);
 
     if (program != NULL)
     {
         executeInstructions(program, numGeneratedInstructions);
-
         free(program);
     }
 
-    // --- ส่วนที่เพิ่ม: คืนหน่วยความจำที่จองไว้สำหรับโค้ด ---
-    for (int i = 0; i < numHighLevelLines; i++)
-    {
-        free(highLevelProgram[i]);
-    }
-    free(highLevelProgram);
-    // ----------------------------------------------------
-
-    // สิ้นสุดการจับเวลา
-    end_time = clock();
-    cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+    printf("\n--- Program Execution Finished ---\n");
 
     if (hSerial != INVALID_HANDLE_VALUE)
     {
         clearSerialBuffer();
         CloseHandle(hSerial);
-        printf("\n[DEBUG] Serial port closed successfully.\n");
+        printf("[DEBUG] Serial port closed successfully.\n");
     }
-
-    printf("\n--------------------------------------------------\n");
-    printf("จำนวนคำสั่งไบนารี ทั้งหมด: %lld\n", BINARY_INSTRUCTION_COUNT);
-    printf("เวลาประมวลผล: %f seconds\n", cpu_time_used);
-    printf("--------------------------------------------------\n");
 
     return 0;
 }

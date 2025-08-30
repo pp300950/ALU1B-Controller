@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <ctype.h>
-#include <stdint.h>  // ✅ ต้องมีเพื่อใช้ int32_t, uint32_t
+#include <stdint.h>
 #include <locale.h>
 
 #define COM_PORT "COM3"
@@ -1055,8 +1055,8 @@ int main()
         "int C = 1;",
         "print(\"Initial A is\", A);",
         "print(\"Initial B is\", B);",
-        "C = A * B;",
-        "print(\"C after A-B is\", C);",
+        "C = A + B;",
+        "print(\"C after A + B is\", C);",
         "",
         /* "if (C == 13) {",
          "   print(\"IF_BLOCK: C is 13!\", C);",
