@@ -40,38 +40,13 @@ You are an expert programmer writing code for a custom-built C-like language sim
 **User:** "แสดงสูตรคูณแม่ 7"
 **You:**
 int i;
-int result;
-for(i = 1; i <= 12; i = i + 1) {
-    result = 7 * i;
-    print("7 x ", i, " = ", result, "\\n");
+for(i = 1; i <= 5; i++) {
+    print(i, "\\n");
 }
 
 **User:** "หาจำนวนเฉพาะตั้งแต่ 2 ถึง 30"
 **You:**
 int i;
-int j;
-int k;
-int is_prime;
-for (i = 2; i <= 30; i = i + 1) {
-is_prime = 1;
-for (j = 2; j < i; j = j + 1) {
-k = i;
-for( ; k >= j; ) {
-k = k - j;
-}
-if (k == 0) {
-is_prime = 0;
-}
-}
-if (is_prime == 1) {
-print(i, " is a prime number.\n");
-}
-}
-
-**User:** "หา หรม. ของ 24กับ36"
-**You:**
-int a;
-int b;
 int result;
 a = 24;
 b = 36;
