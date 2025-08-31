@@ -12,7 +12,8 @@ const int RESULT_OUTPUT_PIN = 9;
 const int INVERT_OUTPUT_PIN = 10;
 const int CARRY_OUT_PIN = 11;
 
-void setup() {
+void setup()
+{
   pinMode(MUX_PIN_0, OUTPUT);
   pinMode(MUX_PIN_1, OUTPUT);
   pinMode(MUX_PIN_2, OUTPUT);
@@ -27,8 +28,10 @@ void setup() {
   Serial.begin(115200);
 }
 
-void loop() {
-  if (Serial.available() > 0) {
+void loop()
+{
+  if (Serial.available() > 0)
+  {
     String input = Serial.readStringUntil('\n');
     input.trim();
 
@@ -36,12 +39,13 @@ void loop() {
     int subAddPin, aInput, bInput, carryIn;
 
     int items = sscanf(input.c_str(), "%3s %d %d %d %d", muxCodeStr, &subAddPin, &aInput, &bInput, &carryIn);
+    if (items == 5)
+    { // <-- แก้กลับเป็น 5
 
-    if (items == 5) {
       int muxBit2 = muxCodeStr[0] - '0';
       int muxBit1 = muxCodeStr[1] - '0';
       int muxBit0 = muxCodeStr[2] - '0';
-      
+
       int resultOutput = 0;
       int carryOutput = 0;
 
@@ -59,37 +63,40 @@ void loop() {
       digitalWrite(MUX_PIN_1, muxBit1);
       digitalWrite(MUX_PIN_0, muxBit0);
       delay(1);
-      
+
       // ถ้าเป็น ADD/SUB operation (MUX code 001)
-      if (muxBit2 == 0 && muxBit1 == 0 && muxBit0 == 1) {
+      if (muxBit2 == 0 && muxBit1 == 0 && muxBit0 == 1)
+      {
         // อ่านค่า A XOR B จาก Half Adder
         int halfAdderSum = digitalRead(RESULT_OUTPUT_PIN);
-        
+
         // ✅ คำนวณ Full Adder Sum = (A XOR B) XOR CarryIn
         resultOutput = halfAdderSum ^ carryIn;
-        
+
         // อ่านค่า Carry จาก Half Adder (A AND B)
-        digitalWrite(MUX_PIN_2, 0);  // Set MUX to 010 for Carry
+        digitalWrite(MUX_PIN_2, 0); // Set MUX to 010 for Carry
         digitalWrite(MUX_PIN_1, 1);
         digitalWrite(MUX_PIN_0, 0);
         delay(1);
-        
+
         int halfAdderCarry = digitalRead(CARRY_OUT_PIN);
-        
+
         // ✅ คำนวณ Full Adder Carry = (A AND B) OR (CarryIn AND (A XOR B))
         carryOutput = halfAdderCarry | (carryIn & halfAdderSum);
       }
       // ถ้าเป็น NOT operation (MUX code 111)
-      else if (muxBit2 == 1 && muxBit1 == 1 && muxBit0 == 1) {
+      else if (muxBit2 == 1 && muxBit1 == 1 && muxBit0 == 1)
+      {
         resultOutput = digitalRead(INVERT_OUTPUT_PIN);
         carryOutput = 0; // NOT operation ไม่มี carry
       }
       // ถ้าเป็น Logic operations อื่นๆ (AND, OR, XOR)
-      else {
+      else
+      {
         resultOutput = digitalRead(RESULT_OUTPUT_PIN);
         carryOutput = 0; // Logic operations ไม่มี carry
       }
-      
+
       // ----------------------------------------------------
       // ขั้นตอนที่ 3: ส่งผลลัพธ์กลับ
       // ----------------------------------------------------

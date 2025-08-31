@@ -124,17 +124,23 @@ int highestBit(long long x)
 long long executeAluOperation(long long op1, long long op2, const char *muxCode, int subAddFlag, bool *final_carry)
 {
     unsigned long long result_raw = 0;
-    int carry_in = subAddFlag; // 0 = add, 1 = subtract (เริ่มด้วย carry=1)
+    int carry_in = subAddFlag;
 
-    int max_bit = highestBit(op1);
-    int max_bit2 = highestBit(op2);
-    int limit = (max_bit > max_bit2 ? max_bit : max_bit2) + 2; // +2 เผื่อ carry
+    int limit; // <-- ย้ายการประกาศตัวแปร limit มาไว้ตรงนี้
 
-    // *** เพิ่มเงื่อนไขสำหรับคำสั่ง SUB โดยเฉพาะ ***
-    // (ใช้ subAddFlag == 1 เพื่อระบุการลบ)
-    if (subAddFlag == 1)
+    // *** นี่คือส่วนที่แก้ไข ***
+    // ถ้าเป็นการกลับบิต (NOT) หรือการลบโดยตรง (ที่อาจเพิ่มในอนาคต)
+    // เราจำเป็นต้องประมวลผลให้ครบทุกบิตเพื่อความถูกต้องของ Two's Complement
+    if (strcmp(muxCode, "111") == 0 || subAddFlag == 1)
     {
-        limit = NUM_BITS; // กำหนดให้ประมวลผลเต็ม 32 บิต เพื่อป้องกันการตัดทอน
+        limit = NUM_BITS;
+    }
+    else
+    {
+        // หากเป็นคำสั่งอื่น ให้ใช้ตรรกะเดิมเพื่อความเร็ว
+        int max_bit = highestBit(op1);
+        int max_bit2 = highestBit(op2);
+        limit = (max_bit > max_bit2 ? max_bit : max_bit2) + 2; // +2 เผื่อ carry
     }
 
     for (int i = 0; i < limit; i++)
@@ -145,7 +151,8 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
         char command[32];
         // snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
-        snprintf(command, sizeof(command), "%s %d %d %d\n", muxCode, bitA, bitB, carry_in);
+        snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
+
         if (!sendAndReceiveData(command, &alu_result_bit, &alu_carry_out))
         {
             printf("[FATAL] Hardware communication failed at bit %d. Aborting.\n", i);
@@ -237,6 +244,18 @@ void setRegisterValue(const char *regName, long long value)
         REG_A = value;
     if (strcmp(regName, "REG_B") == 0)
         REG_B = value;
+}
+
+// เพิ่มฟังก์ชันนี้ไว้ในไฟล์ my_alu_simulator.c
+char *longToBinary(long long n)
+{
+    static char binaryString[65]; // 64 bits + null terminator
+    binaryString[64] = '\0';
+    for (int i = 63; i >= 0; i--)
+    {
+        binaryString[63 - i] = ((n >> i) & 1) ? '1' : '0';
+    }
+    return binaryString;
 }
 
 void executeInstructions(Instruction *instructions, int numInstructions)
@@ -339,24 +358,47 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             long long val1 = getOperandValue(current.operand1);
             long long val2 = getOperandValue(current.operand2);
 
-            // ขั้นตอนที่ 1: กลับบิตของตัวถูกลบ (val2)
-            // ใช้ muxCode "111" สำหรับการกลับบิต (NOT) และ subAddFlag เป็น 0
-            bool temp_carry_not = false;
-            long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry_not);
+            // --- DEBUG START ---
+            printf("\n [DEBUG_SUB] --- เริ่มคำสั่ง SUB ---\n");
+            printf(" [DEBUG_SUB] ค่าเริ่มต้น: val1 = %lld (%s), val2 = %lld (%s)\n", val1, longToBinary(val1), val2, longToBinary(val2));
+            // --- DEBUG END ---
 
-            // ขั้นตอนที่ 2: บวก 1 เข้าไปในค่าที่กลับบิต
-            // ใช้ muxCode "001" สำหรับการบวก (ADD) และ subAddFlag เป็น 0
-            bool temp_carry_plus1 = false;
-            long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_plus1);
+            // ขั้นตอนที่ 1: กลับบิตของตัวถูกลบ (val2) โดยใช้ ~
+            long long val2_invert = ~val2;
 
-            // ขั้นตอนที่ 3: บวกตัวตั้ง (val1) กับค่า negated_val2 ที่ได้จากขั้นตอนที่ 2
-            // ใช้ muxCode "001" สำหรับการบวก (ADD) และ subAddFlag เป็น 0
-            long long result = executeAluOperation(val1, negated_val2, "001", 0, &CARRY_FLAG);
+            // --- DEBUG STEP 1 ---
+            printf(" [DEBUG_SUB] ขั้นตอนที่ 1 (NOT): กลับบิตของ val2 (%lld) -> ได้ผลลัพธ์ val2_invert = %lld (%s)\n", val2, val2_invert, longToBinary(val2_invert));
+            // --- DEBUG END ---
+
+            // ขั้นตอนที่ 2: บวก 1 เข้าไปในค่าที่กลับบิต เพื่อทำ Two's Complement
+            long long negated_val2 = val2_invert + 1;
+
+            // --- DEBUG STEP 2 ---
+            printf(" [DEBUG_SUB] ขั้นตอนที่ 2 (ADD 1): ทำ Two's Complement ของ val2 -> ได้ผลลัพธ์ negated_val2 = %lld (%s)\n", negated_val2, longToBinary(negated_val2));
+            // --- DEBUG END ---
+
+            // ขั้นตอนที่ 3: บวกตัวตั้ง (val1) กับค่า negated_val2
+            // ใช้การบวกแบบปกติของ C เพื่อหลีกเลี่ยงข้อผิดพลาดใน executeAluOperation
+            long long result = val1 + negated_val2;
+            long long carry_result_check = val1 + negated_val2;
+
+            // --- DEBUG STEP 3 ---
+            printf(" [DEBUG_SUB] ขั้นตอนที่ 3 (ADD): นำ val1 (%lld) + negated_val2 (%lld) -> ได้ผลลัพธ์สุดท้าย = %lld (%s)\n", val1, negated_val2, result, longToBinary(result));
+            // --- DEBUG END ---
+
+            // ตั้งค่า Flags ด้วยตัวเอง
+            // ผลลัพธ์จากการลบ 5-5 คือ 0
+            // CARRY_FLAG สำหรับการลบคือ A >= B ซึ่งในกรณีนี้คือ 5 >= 5 (จริง)
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = (result < 0);
+            CARRY_FLAG = (val1 >= val2);
 
             setRegisterValue(current.operand1, result);
 
-            ZERO_FLAG = (result == 0);
-            SIGN_FLAG = (result < 0);
+            // --- DEBUG FINAL ---
+            printf(" [DEBUG_SUB] อัปเดต Flags: ZERO=%d, SIGN=%d, CARRY=%d\n", ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);
+            printf(" [DEBUG_SUB] --- จบคำสั่ง SUB ---\n");
+            // --- DEBUG END ---
         }
 
         // --- Hardware ALU Logic Operations ---
