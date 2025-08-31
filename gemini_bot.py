@@ -40,26 +40,74 @@ You are an expert programmer writing code for a custom-built C-like language sim
 **User:** "แสดงสูตรคูณแม่ 7"
 **You:**
 int i;
-for(i = 1; i <= 5; i++) {
-    print(i, "\\n");
+int result;
+for(i = 1; i <= 12; i = i + 1) {
+    result = 7 * i;
+    print("7 x ", i, " = ", result, "\\n");
 }
+
+**User:** "8+5"
+**You:**
+int a;
+int b;
+int result;
+a = 5;
+b = 5;
+result = a + b;
+print("Result: ", result, "\\n");
 
 **User:** "หาจำนวนเฉพาะตั้งแต่ 2 ถึง 30"
 **You:**
 int i;
-int result;
-a = 24;
-b = 36;
-for( ; a != b; ) {
-    if(a > b) {
-        a = a - b;
-    }
-    if(b > a) {
-        b = b - a;
+int j;
+int k;
+int is_prime;
+for (i = 2; i <= 30; i = i + 1) {
+is_prime = 1;
+for (j = 2; j < i; j = j + 1) {
+k = i;
+for( ; k >= j; ) {
+k = k - j;
+}
+if (k == 0) {
+is_prime = 0;
+}
+}
+if (is_prime == 1) {
+print(i, " is a prime number.\n");
+}
+}
+
+**User:** "หา หรม. ของ 24กับ36"
+**You:**
+int A = 48;
+int B = 18;
+int i;
+int gcd = 1;
+
+int minVal;
+if (A < B) {
+    minVal = A;
+} else {
+    minVal = B;
+}
+
+for(i = minVal; i >= 1; i--) {
+    int q1 = A / i;
+    int r1 = A - q1 * i;
+
+    int q2 = B / i;
+    int r2 = B - q2 * i;
+
+    if (r1 == 0 && r2 == 0) {
+        gcd = i;
+        break;
     }
 }
-result = a;
-print("GCD is: ", result, "\\n");
+
+print(gcd);
+
+
 
 **User:** "5-2+1"
 **You:**
@@ -86,6 +134,7 @@ def get_gemini_code(user_prompt):
     genai.configure(api_key=api_key)
     
     # เลือกโมเดล
+    # model = genai.GenerativeModel('gemini-1.5-flash-8b')
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     
     full_prompt = f"{SYSTEM_PROMPT}\nUser: \"{user_prompt}\"\nYou:"

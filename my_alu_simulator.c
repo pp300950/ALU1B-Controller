@@ -119,40 +119,41 @@ int highestBit(long long x)
     return bit;
 }
 
-#define NUM_BITS 64
+#define NUM_BITS 32
+
 long long executeAluOperation(long long op1, long long op2, const char *muxCode, int subAddFlag, bool *final_carry)
 {
     unsigned long long result_raw = 0;
-    int carry_in = (subAddFlag == 1) ? 1 : 0;
-
-    /*printf("      [DEBUG] ALU(%d-bit) Input: op1=%lld, op2=%lld, sub=%d\n", NUM_BITS, op1, op2, subAddFlag);
-     */
+    int carry_in = subAddFlag; // 0 = add, 1 = subtract (เริ่มด้วย carry=1)
 
     int max_bit = highestBit(op1);
     int max_bit2 = highestBit(op2);
-    int limit = (max_bit > max_bit2 ? max_bit : max_bit2) + 1; // +1 เผื่อ carry
+    int limit = (max_bit > max_bit2 ? max_bit : max_bit2) + 2; // +2 เผื่อ carry
+
+    // *** เพิ่มเงื่อนไขสำหรับคำสั่ง SUB โดยเฉพาะ ***
+    // (ใช้ subAddFlag == 1 เพื่อระบุการลบ)
+    if (subAddFlag == 1)
+    {
+        limit = NUM_BITS; // กำหนดให้ประมวลผลเต็ม 32 บิต เพื่อป้องกันการตัดทอน
+    }
 
     for (int i = 0; i < limit; i++)
     {
-
         int bitA = (op1 >> i) & 1;
         int bitB = (op2 >> i) & 1;
         int alu_result_bit = 0, alu_carry_out = 0;
 
-        // --- ลบ IF/ELSE BLOCK ที่เป็นปัญหาออก ---
-        // ส่งคำสั่งไปยัง ALU สำหรับทุกๆ บิตเสมอ
-        char command[64];
-        snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
-
+        char command[32];
+        // snprintf(command, sizeof(command), "%s %d %d %d %d\n", muxCode, subAddFlag, bitA, bitB, carry_in);
+        snprintf(command, sizeof(command), "%s %d %d %d\n", muxCode, bitA, bitB, carry_in);
         if (!sendAndReceiveData(command, &alu_result_bit, &alu_carry_out))
         {
             printf("[FATAL] Hardware communication failed at bit %d. Aborting.\n", i);
             return 0; // Error
         }
 
-        BINARY_INSTRUCTION_COUNT++; // นับจำนวนคำสั่งที่ส่งไปยังฮาร์ดแวร์
+        BINARY_INSTRUCTION_COUNT++;
 
-        // สร้างผลลัพธ์จากบิตที่ได้กลับมา
         if (alu_result_bit)
         {
             result_raw |= (1ULL << i);
@@ -162,14 +163,10 @@ long long executeAluOperation(long long op1, long long op2, const char *muxCode,
 
     *final_carry = (carry_in == 1);
 
-    /*  printf("      [DEBUG] ALU Raw %d-bit Result: 0x%08llX\n", NUM_BITS, result_raw);
-     */
     long long final_result;
-
-    // การจัดการ Sign Extension สำหรับเลขจำนวนเต็มแบบ 32 บิต
     if (result_raw & (1ULL << (NUM_BITS - 1)))
     {
-        final_result = (long long)(result_raw | (0xFFFFFFFFULL << NUM_BITS));
+        final_result = (long long)(int32_t)result_raw;
     }
     else
     {
@@ -342,26 +339,24 @@ void executeInstructions(Instruction *instructions, int numInstructions)
             long long val1 = getOperandValue(current.operand1);
             long long val2 = getOperandValue(current.operand2);
 
-            bool temp_carry_not = false; // ใช้ตัวแปรชั่วคราวสำหรับ carry flag ของการ NOT
+            // ขั้นตอนที่ 1: กลับบิตของตัวถูกลบ (val2)
+            // ใช้ muxCode "111" สำหรับการกลับบิต (NOT) และ subAddFlag เป็น 0
+            bool temp_carry_not = false;
             long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry_not);
-            /*printf("       [DEBUG] Inverted val2 (~%lld) via ALU: %lld\n", val2, val2_invert);
-             */
 
-            bool temp_carry_plus1 = false; // ใช้ตัวแปรชั่วคราวสำหรับ carry flag ของการบวก 1
+            // ขั้นตอนที่ 2: บวก 1 เข้าไปในค่าที่กลับบิต
+            // ใช้ muxCode "001" สำหรับการบวก (ADD) และ subAddFlag เป็น 0
+            bool temp_carry_plus1 = false;
             long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry_plus1);
-            /*printf("       [DEBUG] Two's Complement of %lld (i.e., -%lld) via ALU: %lld\n", val2, val2, negated_val2);
-             */
 
-            // long long negated_val2 = val2_invert + 1;
+            // ขั้นตอนที่ 3: บวกตัวตั้ง (val1) กับค่า negated_val2 ที่ได้จากขั้นตอนที่ 2
+            // ใช้ muxCode "001" สำหรับการบวก (ADD) และ subAddFlag เป็น 0
             long long result = executeAluOperation(val1, negated_val2, "001", 0, &CARRY_FLAG);
 
             setRegisterValue(current.operand1, result);
 
             ZERO_FLAG = (result == 0);
             SIGN_FLAG = (result < 0);
-
-            /*printf("       [INFO] HW_SUB: %s = %lld - %lld -> %lld. Flags: Z=%d S=%d C=%d\n",
-                   current.operand1, val1, val2, result, ZERO_FLAG, SIGN_FLAG, CARRY_FLAG);*/
         }
 
         // --- Hardware ALU Logic Operations ---
@@ -621,9 +616,10 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                  strcmp(current.instruction, "JZ") == 0 || strcmp(current.instruction, "JE") == 0 ||
                  strcmp(current.instruction, "JNZ") == 0 || strcmp(current.instruction, "JNE") == 0 ||
                  strcmp(current.instruction, "JC") == 0 || strcmp(current.instruction, "JNC") == 0 ||
-                 strcmp(current.instruction, "JG") == 0 || strcmp(current.instruction, "JLT") == 0 || // <-- แก้ไขเป็น JG
-                 strcmp(current.instruction, "JGE") == 0 || strcmp(current.instruction, "JLE") == 0 ||
-                 strcmp(current.instruction, "JO") == 0 || strcmp(current.instruction, "JNO") == 0) // <-- เพิ่ม JO และ JNO เข้าไปด้วย
+                 strcmp(current.instruction, "JG") == 0 || strcmp(current.instruction, "JGE") == 0 ||
+                 strcmp(current.instruction, "JL") == 0 || strcmp(current.instruction, "JLE") == 0 ||
+                 strcmp(current.instruction, "JO") == 0 || strcmp(current.instruction, "JNO") == 0)
+
         {
             bool do_the_jump =
                 (strcmp(current.instruction, "JMP") == 0) ||
@@ -644,6 +640,7 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
             if (do_the_jump)
             {
+
                 bool label_found = false;
                 for (int i = 0; i < labelCount; i++)
                 {
@@ -662,6 +659,11 @@ void executeInstructions(Instruction *instructions, int numInstructions)
                     printf("      [ERROR] Label '%s' not found for JUMP!\n", current.operand1);
                 }
             }
+            else if (strcmp(current.instruction, "JL") == 0)
+            {
+                return (SIGN_FLAG != OVERFLOW_FLAG);
+            }
+
             else
             {
                 /*printf("      [INFO] JUMP condition false. No jump.\n");
