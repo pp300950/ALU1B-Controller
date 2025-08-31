@@ -134,7 +134,7 @@ def get_gemini_code(user_prompt):
     genai.configure(api_key=api_key)
     
     # เลือกโมเดล
-    # model = genai.GenerativeModel('gemini-1.5-flash-8b')
+    #model = genai.GenerativeModel('gemini-1.5-flash-8b')
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     
     full_prompt = f"{SYSTEM_PROMPT}\nUser: \"{user_prompt}\"\nYou:"

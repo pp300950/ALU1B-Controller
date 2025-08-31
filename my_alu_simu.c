@@ -562,39 +562,22 @@ void executeInstructions(Instruction *instructions, int numInstructions)
 
         else if (strcmp(current.instruction, "MOD") == 0)
         {
-            long long val1 = getOperandValue(current.operand1); // Dividend
-            long long val2 = getOperandValue(current.operand2); // Divisor
+            long long val1 = getOperandValue(current.operand1); // ตัวตั้ง
+            long long val2 = getOperandValue(current.operand2); // ตัวหาร
+
             if (val2 == 0)
             {
-                printf("      [ERROR] Division by zero in MOD!\n");
-                break;
+                printf("      [ERROR] Runtime Error: Division by zero in MOD!\n");
+                break; // หยุดการทำงานทันที
             }
 
-            // --- ส่วนที่แก้ไข (ใช้ตรรกะเดียวกับ DIV) ---
-            bool temp_carry;
-            long long val2_invert = executeAluOperation(val2, 0, "111", 0, &temp_carry);
-            long long negated_val2 = executeAluOperation(val2_invert, 1, "001", 0, &temp_carry);
+            // ใช้ตัวดำเนินการ % ของ C เพื่อคำนวณเศษโดยตรง
+            long long result = val1 % val2;
 
-            long long remainder = 0;
-            long long quotient = 0;
-            const int num_bits_div = 32;
-
-            for (int i = num_bits_div - 1; i >= 0; i--)
-            {
-                remainder = (remainder << 1) | ((val1 >> i) & 1);
-                long long test_remainder = executeAluOperation(remainder, negated_val2, "001", 0, &CARRY_FLAG);
-
-                if ((test_remainder >= 0) || (remainder == val2))
-                {
-                    remainder = test_remainder;
-                    quotient |= (1LL << i);
-                }
-            }
-            // --- จบส่วนที่แก้ไข ---
-
-            setRegisterValue(current.operand1, remainder); // <-- ผลลัพธ์ของ MOD คือ remainder
-            ZERO_FLAG = (remainder == 0);
-            SIGN_FLAG = (remainder < 0);
+            // อัปเดตค่าใน Register และตั้งค่า Flags
+            setRegisterValue(current.operand1, result);
+            ZERO_FLAG = (result == 0);
+            SIGN_FLAG = (result < 0);
         }
 
         else if (strcmp(current.instruction, "PRINT") == 0)
@@ -843,7 +826,7 @@ int parseExpression(const char *expr, Instruction *instructions, int instruction
         else
         {
             if (strcmp(token, "+") == 0 || strcmp(token, "-") == 0 ||
-                strcmp(token, "*") == 0 || strcmp(token, "/") == 0)
+                strcmp(token, "*") == 0 || strcmp(token, "/") == 0 || strcmp(token, "%") == 0)
             {
                 // token นี้คือ operator
                 strcpy(op, token);
@@ -877,6 +860,8 @@ int parseExpression(const char *expr, Instruction *instructions, int instruction
                     sprintf(instructions[instructionCount].instruction, "DIV");*/
                 else if (strcmp(op, "/") == 0)
                     sprintf(instructions[instructionCount].instruction, "DIV_FAST");
+                else if (strcmp(op, "%") == 0) // <--- เพิ่มบรรทัดนี้
+                    sprintf(instructions[instructionCount].instruction, "MOD");
 
                 sprintf(instructions[instructionCount].operand1, "REG_A");
                 sprintf(instructions[instructionCount].operand2, "REG_B");
@@ -919,7 +904,7 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
     int else_jump_fix_stack[JUMP_STACK_SIZE];
     int else_stack_ptr = -1;
     // Stack สำหรับเก็บจุดที่ต้องกระโดดออกจาก loop (หลังจากจบ loop)
-    int loop_exit_jump_stack[JUMP_STACK_SIZE]; 
+    int loop_exit_jump_stack[JUMP_STACK_SIZE];
     int loop_stack_ptr = -1;
 
     // printf("\n--- Compiler: Stage 1 - Parsing and Generating Instructions ---\n");
@@ -1101,16 +1086,16 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
                 instructionCount++;
             }
         }
-        else if (strcmp(trimmed_line, "break;") == 0)
+        else if (strcmp(trimmed_line, "break") == 0)
         {
             // ตรวจสอบว่าเราอยู่ใน loop หรือไม่
             if (loop_stack_ptr >= 0)
             {
                 // ดึงตำแหน่งของคำสั่ง JUMP ที่ใช้ للخروجจาก loop ปัจจุบัน
                 int exit_jump_idx = loop_exit_jump_stack[loop_stack_ptr];
-                
+
                 // ดึงชื่อ Label ปลายทางจากคำสั่ง JUMP นั้น
-                char* exit_label_name = instructions[exit_jump_idx].operand1;
+                char *exit_label_name = instructions[exit_jump_idx].operand1;
 
                 // สร้างคำสั่ง JMP เพื่อกระโดดไปยัง Label ปลายทางทันที
                 sprintf(instructions[instructionCount].instruction, "JMP");
@@ -1119,10 +1104,10 @@ Instruction *parseAndGenerateInstructions(const char **highLevelCode, int numLin
             }
             else
             {
-                 // กรณีใช้ break นอก loop
-                 printf("ERROR: 'break' statement not within a loop.\n");
-                 free(instructions);
-                 return NULL;
+                // กรณีใช้ break นอก loop
+                printf("ERROR: 'break' statement not within a loop.\n");
+                free(instructions);
+                return NULL;
             }
         }
 
@@ -1563,7 +1548,9 @@ bool executeArduinoCLI(const char *cliPath, const char *board, const char *port,
     return true;
 }
 
-int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
+
+
+int main() // ไม่ต้องรับ arguments แล้ว
 {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
@@ -1571,15 +1558,7 @@ int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
     clock_t start_time, end_time;
     double cpu_time_used;
 
-    if (argc < 2)
-    {
-        printf("[FATAL] Usage: %s <path_to_code_file>\n", argv[0]);
-        printf("[FATAL] This program is intended to be called by a script.\n");
-        return 1;
-    }
-    const char *codeFilePath = argv[1];
-    // --------------------------------------------------------
-
+    // ส่วนของการเรียกใช้ Arduino และการตั้งค่า Serial Port ยังคงเดิม
     const char *arduinoCliPath = "C:\\Users\\Administrator\\Desktop\\arduino-cli.exe";
     const char *boardType = "arduino:avr:uno";
     const char *inoFilePath = "C:\\Users\\Administrator\\Desktop\\ALU4B-Controller/ALU4B-Controller/ALU4B-Controller.ino";
@@ -1599,35 +1578,30 @@ int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
         return 1;
     }
 
-    // --- ส่วนที่แก้ไข: อ่านโค้ดจากไฟล์ที่ระบุ ---
-    char **highLevelProgram = NULL;
-    int numHighLevelLines = 0;
-    FILE *file = fopen(codeFilePath, "r");
-    if (file == NULL)
-    {
-        printf("[FATAL] Could not open code file: %s\n", codeFilePath);
-        CloseHandle(hSerial);
-        return 1;
-    }
+   const char *highLevelProgram[] = {
+        "int a = 48;",
+        "int b = 18;",
+        "int minVal = 18;",
+        "int i = 0;",
+        "int gcd = 0;",
+        "",
+        "for(i = minVal; i >= 1; i--) {",
+        "    int r1 = a % i;",
+        "    int r2 = b % i;",
+        "    if (r1 == 0) {",
+        "        if (r2 == 0) {",
+        "            gcd = i;",
+        "            break;",
+        "        }",
+        "    }",
+        "}",
+        "",
+        "print(\"GCD is: \", gcd, \"\\n\");"
+    };
 
-    char lineBuffer[512];
-    while (fgets(lineBuffer, sizeof(lineBuffer), file) != NULL)
-    {
-        highLevelProgram = (char **)realloc(highLevelProgram, sizeof(char *) * (numHighLevelLines + 1));
-        if (highLevelProgram == NULL)
-        {
-            printf("[FATAL] Memory allocation failed!\n");
-            fclose(file);
-            CloseHandle(hSerial);
-            return 1;
-        }
-        // ลบ \n หรือ \r\n ที่อาจติดมาท้ายบรรทัด
-        lineBuffer[strcspn(lineBuffer, "\r\n")] = 0;
-        highLevelProgram[numHighLevelLines] = _strdup(lineBuffer);
-        numHighLevelLines++;
-    }
-    fclose(file);
-    // ---------------------------------------------
+    // คำนวณจำนวนบรรทัดของโค้ดโดยอัตโนมัติ
+    int numHighLevelLines = sizeof(highLevelProgram) / sizeof(highLevelProgram[0]);
+    // --- จบส่วนใส่โค้ด ---
 
     // เริ่มจับเวลา
     start_time = clock();
@@ -1638,17 +1612,10 @@ int main(int argc, char *argv[]) // แก้ไขให้รับ arguments
     if (program != NULL)
     {
         executeInstructions(program, numGeneratedInstructions);
-
         free(program);
     }
 
-    // --- ส่วนที่เพิ่ม: คืนหน่วยความจำที่จองไว้สำหรับโค้ด ---
-    for (int i = 0; i < numHighLevelLines; i++)
-    {
-        free(highLevelProgram[i]);
-    }
-    free(highLevelProgram);
-    // ----------------------------------------------------
+    // ไม่ต้องคืนหน่วยความจำของ highLevelProgram แล้ว เพราะเป็น static array
 
     // สิ้นสุดการจับเวลา
     end_time = clock();

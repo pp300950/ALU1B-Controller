@@ -1,28 +1,7 @@
-int a;
-int b;
-int c;
-int d;
-int e;
-int f;
-int g;
-int h;
-a = 3;
-b = 2;
-c = 5;
-d = 1;
-e = 10;
-f = 5;
-g = 25;
-h = 5;
-int result1;
-result1 = a + b;
-int result2;
-result2 = c * d;
-int result3;
-result3 = e - f;
-int result4;
-result4 = g / h;
-print("Result 1: ", result1, "\n");
-print("Result 2: ", result2, "\n");
-print("Result 3: ", result3, "\n");
-print("Result 4: ", result4, "\n");
+int i;
+for(i = 1; i <= 10; i = i + 1) {
+    if (i != 5) {
+        print(i, " ");
+    }
+}
+print("\n");
